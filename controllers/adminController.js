@@ -1,7 +1,7 @@
 const db = require('../config/db');
 const nodemailer = require('nodemailer');
 
-// Email bhejne ka function
+// 📨 Function to send email
 async function sendDoctorCredentials(toEmail, doctorId, password) {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -21,12 +21,12 @@ async function sendDoctorCredentials(toEmail, doctorId, password) {
   await transporter.sendMail(mailOptions);
 }
 
-// ✅ Doctor/Admin Registration
+// ✅ Add new doctor/admin
 exports.addAdmin = async (req, res) => {
   const { name, email, hospital, degree, password, doctor_id } = req.body;
 
   try {
-    // ✅ Step 1: Create table if it doesn't exist
+    // Step 1: Ensure table exists
     await db.query(`
       CREATE TABLE IF NOT EXISTS admin (
         id SERIAL PRIMARY KEY,
@@ -40,32 +40,99 @@ exports.addAdmin = async (req, res) => {
       );
     `);
 
-    // ✅ Step 2: Check for duplicate email or doctor_id
-    const checkEmail = await db.query('SELECT * FROM admin WHERE email = $1', [email]);
-    if (checkEmail.rows.length > 0) {
+    // Step 2: Check for duplicates
+    const emailExists = await db.query('SELECT * FROM admin WHERE email = $1', [email]);
+    if (emailExists.rows.length > 0) {
       return res.status(409).json({ error: 'Email already exists' });
     }
 
-    const checkDoctorId = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
-    if (checkDoctorId.rows.length > 0) {
+    const doctorIdExists = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
+    if (doctorIdExists.rows.length > 0) {
       return res.status(409).json({ error: 'Doctor ID already exists' });
     }
 
-    // ✅ Step 3: Insert into DB with is_first_login = true
+    // Step 3: Insert into DB
     const result = await db.query(
       'INSERT INTO admin (name, email, hospital, degree, password, doctor_id, is_first_login) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
       [name, email, hospital, degree, password, doctor_id, true]
     );
 
-    // ✅ Step 4: Send Email to user
+    // Step 4: Send credentials by email
     await sendDoctorCredentials(email, doctor_id, password);
 
     res.status(201).json({
       message: 'Admin added and credentials emailed',
       admin: result.rows[0],
     });
+
   } catch (err) {
-    console.error(err);
+    console.error('Add Admin Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// 🔐 Doctor Login
+exports.loginDoctor = async (req, res) => {
+  const { doctor_id, password } = req.body;
+
+  try {
+    const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Doctor ID not found' });
+    }
+
+    const doctor = result.rows[0];
+
+    if (doctor.password !== password) {
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    res.status(200).json({
+      message: 'Login successful',
+      doctor: {
+        id: doctor.id,
+        name: doctor.name,
+        email: doctor.email,
+        hospital: doctor.hospital,
+        degree: doctor.degree,
+        doctor_id: doctor.doctor_id,
+        is_first_login: doctor.is_first_login
+      },
+    });
+
+  } catch (err) {
+    console.error('Login Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// 🔁 Change Password
+exports.changePassword = async (req, res) => {
+  const { doctor_id, oldPassword, newPassword } = req.body;
+
+  try {
+    const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Doctor ID not found' });
+    }
+
+    const doctor = result.rows[0];
+
+    if (doctor.password !== oldPassword) {
+      return res.status(401).json({ error: 'Old password is incorrect' });
+    }
+
+    await db.query(
+      'UPDATE admin SET password = $1, is_first_login = false WHERE doctor_id = $2',
+      [newPassword, doctor_id]
+    );
+
+    res.status(200).json({ message: 'Password updated successfully' });
+
+  } catch (err) {
+    console.error('Change Password Error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
