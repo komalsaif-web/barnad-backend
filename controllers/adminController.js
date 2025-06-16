@@ -106,15 +106,14 @@ exports.loginDoctor = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-// 🔁 Change Password (Update version)
 exports.changePassword = async (req, res) => {
   const { doctor_id, password, newPassword } = req.body;
 
-  console.log("Received:", { doctor_id, password, newPassword });
+  console.log("Received:", { doctor_id, password, newPassword }); // ✅ Debug line
 
   try {
     const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
-    console.log("Doctor Found:", result.rows);
+    console.log("Doctor Found:", result.rows); // ✅ Debug line
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Doctor ID not found' });
@@ -131,12 +130,15 @@ exports.changePassword = async (req, res) => {
       [newPassword, doctor_id]
     );
 
+    console.log("Password updated successfully for:", doctor_id); // ✅ Debug line
+
     res.status(200).json({ message: 'Password updated successfully' });
 
   } catch (err) {
-    console.error('Change Password Error:', err.message || err);
+    console.error('Change Password Error:', err); // ✅ Error log
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
 
 
