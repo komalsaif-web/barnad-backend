@@ -108,6 +108,7 @@ exports.loginDoctor = async (req, res) => {
 };
 
 // 🔁 Change Password
+// 🔁 Change Password (Update version)
 exports.changePassword = async (req, res) => {
   const { doctor_id, password, newPassword } = req.body;
 
@@ -120,10 +121,12 @@ exports.changePassword = async (req, res) => {
 
     const doctor = result.rows[0];
 
+    // ✅ Check current password
     if (doctor.password !== password) {
-      return res.status(401).json({ error: 'Old password is incorrect' });
+      return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
+    // ✅ Update to new password
     await db.query(
       'UPDATE admin SET password = $1, is_first_login = false WHERE doctor_id = $2',
       [newPassword, doctor_id]
@@ -136,3 +139,4 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
