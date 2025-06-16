@@ -4,14 +4,14 @@ const app = express();
 require('dotenv').config();
 
 // ✅ Import your routes
-const adminRoutes = require('./routes/adiminRoutes'); // ensure correct filename
+const adminRoutes = require('./routes/adminRoutes'); // ✅ fixed typo
 
 // ✅ Middleware
 app.use(cors());
 app.use(express.json());
 
 // ✅ Routes
-app.use('/api/admin', adminRoutes);
+app.use('/api', adminRoutes); // /api/admin, /api/login, etc.
 
 // ✅ Root route to fix "Cannot GET /"
 app.get('/', (req, res) => {

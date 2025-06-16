@@ -21,7 +21,7 @@ async function sendDoctorCredentials(toEmail, doctorId, password) {
   await transporter.sendMail(mailOptions);
 }
 
-// Main Controller
+// ✅ Doctor/Admin Registration
 exports.addAdmin = async (req, res) => {
   const { name, email, hospital, degree, password, doctor_id } = req.body;
 
@@ -35,7 +35,8 @@ exports.addAdmin = async (req, res) => {
         hospital TEXT,
         degree TEXT,
         password TEXT NOT NULL,
-        doctor_id TEXT UNIQUE NOT NULL
+        doctor_id TEXT UNIQUE NOT NULL,
+        is_first_login BOOLEAN DEFAULT true
       );
     `);
 
@@ -50,10 +51,10 @@ exports.addAdmin = async (req, res) => {
       return res.status(409).json({ error: 'Doctor ID already exists' });
     }
 
-    // ✅ Step 3: Insert into DB
+    // ✅ Step 3: Insert into DB with is_first_login = true
     const result = await db.query(
-      'INSERT INTO admin (name, email, hospital, degree, password, doctor_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, email, hospital, degree, password, doctor_id]
+      'INSERT INTO admin (name, email, hospital, degree, password, doctor_id, is_first_login) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name, email, hospital, degree, password, doctor_id, true]
     );
 
     // ✅ Step 4: Send Email to user
