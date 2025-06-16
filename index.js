@@ -4,7 +4,7 @@ const app = express();
 require('dotenv').config();
 
 // ✅ Import your routes
-const adminRoutes = require('./routes/adminRoutes'); // ✅ fixed typo
+const adminRoutes = require('./routes/adiminRoutes'); // ✅ fixed typo
 
 // ✅ Middleware
 app.use(cors());
