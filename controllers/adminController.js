@@ -109,7 +109,7 @@ exports.loginDoctor = async (req, res) => {
 
 // 🔁 Change Password
 exports.changePassword = async (req, res) => {
-  const { doctor_id, oldPassword, newPassword } = req.body;
+  const { doctor_id, password, newPassword } = req.body;
 
   try {
     const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
@@ -120,7 +120,7 @@ exports.changePassword = async (req, res) => {
 
     const doctor = result.rows[0];
 
-    if (doctor.password !== oldPassword) {
+    if (doctor.password !== password) {
       return res.status(401).json({ error: 'Old password is incorrect' });
     }
 
