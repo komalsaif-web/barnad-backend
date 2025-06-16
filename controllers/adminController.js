@@ -26,7 +26,7 @@ exports.addAdmin = async (req, res) => {
   const { name, email, hospital, degree, password, doctor_id } = req.body;
 
   try {
-    // Step 1: Ensure table exists
+    // Step 1: Ensure table exists (without is_first_login)
     await db.query(`
       CREATE TABLE IF NOT EXISTS admin (
         id SERIAL PRIMARY KEY,
@@ -35,8 +35,7 @@ exports.addAdmin = async (req, res) => {
         hospital TEXT,
         degree TEXT,
         password TEXT NOT NULL,
-        doctor_id TEXT UNIQUE NOT NULL,
-        is_first_login BOOLEAN DEFAULT true
+        doctor_id TEXT UNIQUE NOT NULL
       );
     `);
 
@@ -53,8 +52,8 @@ exports.addAdmin = async (req, res) => {
 
     // Step 3: Insert into DB
     const result = await db.query(
-      'INSERT INTO admin (name, email, hospital, degree, password, doctor_id, is_first_login) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [name, email, hospital, degree, password, doctor_id, true]
+      'INSERT INTO admin (name, email, hospital, degree, password, doctor_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, email, hospital, degree, password, doctor_id]
     );
 
     // Step 4: Send credentials by email
@@ -97,7 +96,6 @@ exports.loginDoctor = async (req, res) => {
         hospital: doctor.hospital,
         degree: doctor.degree,
         doctor_id: doctor.doctor_id,
-        is_first_login: doctor.is_first_login
       },
     });
 
@@ -106,14 +104,13 @@ exports.loginDoctor = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// 🔑 Change Password
 exports.changePassword = async (req, res) => {
   const { doctor_id, password, newPassword } = req.body;
 
-  console.log("Received:", { doctor_id, password, newPassword }); // ✅ Debug line
-
   try {
     const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
-    console.log("Doctor Found:", result.rows); // ✅ Debug line
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Doctor ID not found' });
@@ -126,19 +123,14 @@ exports.changePassword = async (req, res) => {
     }
 
     await db.query(
-      'UPDATE admin SET password = $1, is_first_login = false WHERE doctor_id = $2',
+      'UPDATE admin SET password = $1 WHERE doctor_id = $2',
       [newPassword, doctor_id]
     );
-
-    console.log("Password updated successfully for:", doctor_id); // ✅ Debug line
 
     res.status(200).json({ message: 'Password updated successfully' });
 
   } catch (err) {
-    console.error('Change Password Error:', err); // ✅ Error log
+    console.error('Change Password Error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-
-
-
