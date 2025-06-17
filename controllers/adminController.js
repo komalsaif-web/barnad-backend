@@ -105,11 +105,12 @@ exports.loginDoctor = async (req, res) => {
   }
 };
 
-// 🔑 Change Password
+// 🔑 Change Password 
 exports.changePassword = async (req, res) => {
-  const { doctor_id, password, newPassword } = req.body;
+  const { doctor_id, password, newPassword, confirmPassword } = req.body;
 
   try {
+    // 1. Find doctor by ID
     const result = await db.query('SELECT * FROM admin WHERE doctor_id = $1', [doctor_id]);
 
     if (result.rows.length === 0) {
@@ -118,10 +119,17 @@ exports.changePassword = async (req, res) => {
 
     const doctor = result.rows[0];
 
+    // 2. Check current password
     if (doctor.password !== password) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
+    // 3. Check if new and confirm password match
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'New password and confirm password do not match' });
+    }
+
+    // 4. Update password
     await db.query(
       'UPDATE admin SET password = $1 WHERE doctor_id = $2',
       [newPassword, doctor_id]
@@ -134,3 +142,4 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
