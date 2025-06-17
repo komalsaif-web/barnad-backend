@@ -33,6 +33,15 @@ exports.createPatient = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
+    // Check if doctor exists before inserting
+    const doctorCheck = await db.query(
+      'SELECT * FROM admin WHERE doctor_id = $1',
+      [doctor_id]
+    );
+    if (doctorCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Doctor ID not found' });
+    }
+
     const result = await db.query(
       `INSERT INTO patient (
         name, phone_number, address, age, gender, disease, doctor_id, appointment_time
@@ -54,7 +63,7 @@ exports.createPatient = async (req, res) => {
       patient: result.rows[0],
     });
   } catch (err) {
-    console.error('Create Patient Error:', err);
+    console.error('Create Patient Error:', err.message); // Log detailed error
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -70,7 +79,7 @@ exports.getAllPatients = async (req, res) => {
       patients: result.rows,
     });
   } catch (err) {
-    console.error('Get Patients Error:', err);
+    console.error('Get Patients Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -92,7 +101,7 @@ exports.getPatientsByDoctor = async (req, res) => {
 
     res.status(200).json({ patients: result.rows });
   } catch (err) {
-    console.error('Get Patients By Doctor Error:', err);
+    console.error('Get Patients By Doctor Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
