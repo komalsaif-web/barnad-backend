@@ -125,3 +125,24 @@ exports.getPatientsByDoctor = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+// ✅ Get patients by appointment date
+exports.getPatientsByDate = async (req, res) => {
+  const { date } = req.params;
+
+  try {
+    await ensurePatientTableExists();
+
+    const result = await db.query(
+      `SELECT id, name, appointment_time, disease, age, gender, phone_number, doctor_id
+       FROM patient
+       WHERE DATE(appointment_time) = $1
+       ORDER BY appointment_time ASC`,
+      [date]  // format should be 'YYYY-MM-DD'
+    );
+
+    res.status(200).json({ patients: result.rows });
+  } catch (err) {
+    console.error('Get Patients By Date Error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
