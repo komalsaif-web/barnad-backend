@@ -1,8 +1,8 @@
 const db = require('../config/db');
 
-// 🧠 Ensure patient table and doctor_id column exist
+// 🧠 Ensure patient table and columns exist
 async function ensurePatientTableExists() {
-  // 1. Create the patient table without doctor_id first
+  // Step 1: Create patient table if not exists (basic fields)
   await db.query(`
     CREATE TABLE IF NOT EXISTS patient (
       id SERIAL PRIMARY KEY,
@@ -11,22 +11,27 @@ async function ensurePatientTableExists() {
       address TEXT,
       age INTEGER,
       gender TEXT,
-      disease TEXT,
-      appointment_time TIMESTAMP
+      disease TEXT
     );
   `);
 
-  // 2. Add doctor_id column if not exists
-  const columnCheck = await db.query(`
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_name='patient' AND column_name='doctor_id'
+  // Step 2: Add appointment_time column if missing
+  const appointmentTimeCheck = await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'patient' AND column_name = 'appointment_time'
   `);
+  if (appointmentTimeCheck.rows.length === 0) {
+    await db.query(`ALTER TABLE patient ADD COLUMN appointment_time TIMESTAMP`);
+  }
 
-  if (columnCheck.rows.length === 0) {
+  // Step 3: Add doctor_id column if missing
+  const doctorIdCheck = await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'patient' AND column_name = 'doctor_id'
+  `);
+  if (doctorIdCheck.rows.length === 0) {
     await db.query(`
-      ALTER TABLE patient
-      ADD COLUMN doctor_id TEXT REFERENCES admin(doctor_id) ON DELETE SET NULL
+      ALTER TABLE patient ADD COLUMN doctor_id TEXT REFERENCES admin(doctor_id) ON DELETE SET NULL
     `);
   }
 }
@@ -47,17 +52,16 @@ exports.createPatient = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // Check if doctor exists
+    // ✅ Check if doctor exists
     const doctorCheck = await db.query(
       'SELECT * FROM admin WHERE doctor_id = $1',
       [doctor_id]
     );
-
     if (doctorCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Doctor ID not found' });
     }
 
-    // Insert patient
+    // ✅ Insert patient
     const result = await db.query(
       `INSERT INTO patient (
         name, phone_number, address, age, gender, disease, appointment_time, doctor_id
@@ -91,7 +95,9 @@ exports.getAllPatients = async (req, res) => {
 
     const result = await db.query('SELECT id, name FROM patient');
 
-    res.status(200).json({ patients: result.rows });
+    res.status(200).json({
+      patients: result.rows,
+    });
   } catch (err) {
     console.error('Get Patients Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
