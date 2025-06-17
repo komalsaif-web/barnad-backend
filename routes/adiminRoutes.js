@@ -5,6 +5,6 @@ const { addAdmin , loginDoctor , changePassword , getAllDoctorNames} = require('
 router.post('/admin', addAdmin);
 router.post('/login', loginDoctor);
 router.post('/change-password', changePassword);
-router.post('/doctor-name', getAllDoctorNames);
+router.get('/doctor-name', getAllDoctorNames);
 
 module.exports = router;
