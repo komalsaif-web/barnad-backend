@@ -143,13 +143,12 @@ exports.changePassword = async (req, res) => {
   }
 };
 
-// 📋 Get all doctor names
+// 📋 Get all doctor names with doctor_id
 exports.getAllDoctorNames = async (req, res) => {
   try {
-    const result = await db.query('SELECT name FROM admin ORDER BY name ASC');
-    const doctorNames = result.rows.map(row => row.name);
+    const result = await db.query('SELECT name, doctor_id FROM admin ORDER BY name ASC');
 
-    res.status(200).json({ doctors: doctorNames });
+    res.status(200).json({ doctors: result.rows }); // [{name: "...", doctor_id: "..."}]
   } catch (err) {
     console.error('Get All Doctor Names Error:', err);
     res.status(500).json({ error: 'Internal server error' });
