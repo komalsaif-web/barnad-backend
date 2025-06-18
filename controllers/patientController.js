@@ -168,37 +168,27 @@ exports.deleteAppointment = async (req, res) => {
   }
 };
 
-// ✅ Update is_active status (active = current date and time within 1 hour)
 exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // 🕒 Get current PKT time from DB (not JS)
-    const currentTimeRes = await db.query(`SELECT CURRENT_DATE AT TIME ZONE 'Asia/Karachi' AS current_date, CURRENT_TIME AT TIME ZONE 'Asia/Karachi' AS current_time`);
-    const { current_date, current_time } = currentTimeRes.rows[0];
-
-    console.log("📅 Current Date (PKT):", current_date);
-    console.log("⏰ Current Time (PKT):", current_time);
-
-    // ✅ Set is_active = TRUE if current PKT date and time match criteria
+    // ✅ Use Pakistan time explicitly in SQL comparisons
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
       WHERE appointment_date = CURRENT_DATE
-        AND appointment_time <= CURRENT_TIME AT TIME ZONE 'Asia/Karachi'
-        AND CURRENT_TIME AT TIME ZONE 'Asia/Karachi' < appointment_time + INTERVAL '1 hour'
+        AND appointment_time <= (CURRENT_TIME AT TIME ZONE 'Asia/Karachi')
+        AND (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') < appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ Set is_active = FALSE for others
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
       WHERE appointment_date != CURRENT_DATE
-         OR CURRENT_TIME AT TIME ZONE 'Asia/Karachi' < appointment_time
-         OR CURRENT_TIME AT TIME ZONE 'Asia/Karachi' >= appointment_time + INTERVAL '1 hour'
+         OR (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') < appointment_time
+         OR (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') >= appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ Fetch patient statuses with date + time
     const result = await db.query(`
       SELECT 
         name,
@@ -214,11 +204,12 @@ exports.updateActiveStatus = async (req, res) => {
 
     res.status(200).json({
       message: 'Patient statuses updated successfully',
-      patients: result.rows,
+      patients: result.rows
     });
   } catch (err) {
     console.error('Update Active Status Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
 
