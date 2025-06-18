@@ -172,21 +172,21 @@ exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // ✅ Use Pakistan time explicitly in SQL comparisons
+    // ✅ Use Pakistan time zone directly inside SQL comparison
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
       WHERE appointment_date = CURRENT_DATE
-        AND appointment_time <= (CURRENT_TIME AT TIME ZONE 'Asia/Karachi')
-        AND (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') < appointment_time + INTERVAL '1 hour'
+        AND appointment_time <= (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi')
+        AND (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') < appointment_time + INTERVAL '1 hour'
     `);
 
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
       WHERE appointment_date != CURRENT_DATE
-         OR (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') < appointment_time
-         OR (CURRENT_TIME AT TIME ZONE 'Asia/Karachi') >= appointment_time + INTERVAL '1 hour'
+         OR (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') < appointment_time
+         OR (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') >= appointment_time + INTERVAL '1 hour'
     `);
 
     const result = await db.query(`
