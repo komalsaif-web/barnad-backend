@@ -223,5 +223,39 @@ exports.updateActiveStatus = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+// ✅ Update appointment date and time by patient ID
+exports.updateAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { appointment_date, appointment_time } = req.body;
+
+  try {
+    await ensurePatientTableExists();
+
+    // 🔍 Check if patient exists
+    const check = await db.query('SELECT * FROM patient WHERE id = $1', [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    // 📝 Update date and time
+    const result = await db.query(
+      `UPDATE patient
+       SET appointment_date = $1,
+           appointment_time = $2,
+           is_active = FALSE
+       WHERE id = $3
+       RETURNING *`,
+      [appointment_date, appointment_time, id]
+    );
+
+    res.status(200).json({
+      message: 'Appointment updated successfully',
+      updated_patient: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Update Appointment Error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 
