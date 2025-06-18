@@ -7,6 +7,6 @@ router.get('/all', patientController.getAllPatients);
 router.get('/by-doctor/:doctor_id', patientController.getPatientsByDoctor);
 router.get('/by-date/:date', patientController.getPatientsByDate);
 router.delete('/delete/:id', patientController.deleteAppointment);
-router.put('/update-status', patientController.updateActiveStatus);
+router.get('/update-status', patientController.updateActiveStatus);
 
 module.exports = router;

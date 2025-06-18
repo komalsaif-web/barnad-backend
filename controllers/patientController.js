@@ -1,6 +1,6 @@
 const db = require('../config/db');
 
-// 🧠 Ensure patient table and columns exist
+// 🧠 Ensure patient table and all columns exist
 async function ensurePatientTableExists() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS patient (
@@ -14,30 +14,23 @@ async function ensurePatientTableExists() {
     );
   `);
 
-  const appointmentTimeCheck = await db.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_name = 'patient' AND column_name = 'appointment_time'
-  `);
-  if (appointmentTimeCheck.rows.length === 0) {
-    await db.query(`ALTER TABLE patient ADD COLUMN appointment_time TIMESTAMP`);
-  }
+  // 👇 Check + Add all required columns
+  const columns = [
+    { name: 'appointment_date', type: 'DATE' },
+    { name: 'appointment_time', type: 'TIME' },
+    { name: 'doctor_id', type: 'TEXT REFERENCES admin(doctor_id) ON DELETE SET NULL' },
+    { name: 'is_active', type: 'BOOLEAN DEFAULT FALSE' }
+  ];
 
-  const doctorIdCheck = await db.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_name = 'patient' AND column_name = 'doctor_id'
-  `);
-  if (doctorIdCheck.rows.length === 0) {
-    await db.query(`
-      ALTER TABLE patient ADD COLUMN doctor_id TEXT REFERENCES admin(doctor_id) ON DELETE SET NULL
-    `);
-  }
+  for (const col of columns) {
+    const exists = await db.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'patient' AND column_name = $1
+    `, [col.name]);
 
-  const isActiveCheck = await db.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_name = 'patient' AND column_name = 'is_active'
-  `);
-  if (isActiveCheck.rows.length === 0) {
-    await db.query(`ALTER TABLE patient ADD COLUMN is_active BOOLEAN DEFAULT FALSE`);
+    if (exists.rows.length === 0) {
+      await db.query(`ALTER TABLE patient ADD COLUMN ${col.name} ${col.type}`);
+    }
   }
 }
 
@@ -51,7 +44,8 @@ exports.createPatient = async (req, res) => {
     gender,
     disease,
     doctor_id,
-    appointment_time,
+    appointment_date, // format: YYYY-MM-DD
+    appointment_time  // format: HH:mm:ss
   } = req.body;
 
   try {
@@ -67,8 +61,9 @@ exports.createPatient = async (req, res) => {
 
     const result = await db.query(
       `INSERT INTO patient (
-        name, phone_number, address, age, gender, disease, appointment_time, doctor_id, is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE) RETURNING *`,
+        name, phone_number, address, age, gender, disease,
+        appointment_date, appointment_time, doctor_id, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE) RETURNING *`,
       [
         name,
         phone_number,
@@ -76,6 +71,7 @@ exports.createPatient = async (req, res) => {
         age,
         gender,
         disease,
+        appointment_date,
         appointment_time,
         doctor_id,
       ]
@@ -115,10 +111,10 @@ exports.getPatientsByDoctor = async (req, res) => {
     await ensurePatientTableExists();
 
     const result = await db.query(
-      `SELECT id, name, appointment_time, disease, age, gender, phone_number, is_active
+      `SELECT id, name, appointment_date, appointment_time, disease, age, gender, phone_number, is_active
        FROM patient
        WHERE doctor_id = $1
-       ORDER BY appointment_time ASC`,
+       ORDER BY appointment_date ASC, appointment_time ASC`,
       [doctor_id]
     );
 
@@ -139,9 +135,9 @@ exports.getPatientsByDate = async (req, res) => {
     const result = await db.query(
       `SELECT id, name, appointment_time, disease, age, gender, phone_number, doctor_id, is_active
        FROM patient
-       WHERE DATE(appointment_time) = $1
+       WHERE appointment_date = $1
        ORDER BY appointment_time ASC`,
-      [date] // format: 'YYYY-MM-DD'
+      [date]
     );
 
     res.status(200).json({ patients: result.rows });
@@ -172,43 +168,47 @@ exports.deleteAppointment = async (req, res) => {
   }
 };
 
-// ✅ Update is_active status and return name with status
+// ✅ Update is_active status (active = current date and time within 1 hour)
 exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // ✅ 1. Set is_active = true if appointment time is now ±1 hour
+    // Set timezone to Asia/Karachi
+    await db.query(`SET TIME ZONE 'Asia/Karachi'`);
+
+    // ✅ Set is_active = TRUE if date is today AND time within ±1 hour
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
-      WHERE appointment_time <= NOW()
-        AND NOW() < appointment_time + INTERVAL '1 hour'
+      WHERE appointment_date = CURRENT_DATE
+        AND appointment_time <= CURRENT_TIME
+        AND CURRENT_TIME < appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ 2. Set is_active = false otherwise
+    // ✅ Otherwise, set is_active = FALSE
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
-      WHERE appointment_time + INTERVAL '1 hour' <= NOW()
-         OR NOW() < appointment_time
+      WHERE appointment_date != CURRENT_DATE
+         OR CURRENT_TIME < appointment_time
+         OR CURRENT_TIME >= appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ 3. Fetch names with status
+    // ✅ Return all patients with their active status
     const result = await db.query(`
-      SELECT name, 
-        CASE 
-          WHEN is_active THEN 'active' 
-          ELSE 'no active' 
+      SELECT name,
+        CASE
+          WHEN is_active THEN 'active'
+          ELSE 'no active'
         END AS status
       FROM patient
-      ORDER BY appointment_time ASC
+      ORDER BY appointment_date ASC, appointment_time ASC
     `);
 
     res.status(200).json({
       message: 'Patient statuses updated successfully',
       patients: result.rows
     });
-
   } catch (err) {
     console.error('Update Active Status Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
