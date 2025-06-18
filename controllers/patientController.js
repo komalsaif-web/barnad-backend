@@ -172,34 +172,46 @@ exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // ✅ Use Pakistan time zone directly inside SQL comparison
+    // ✅ Set patients as active if now is within appointment timestamp ± 1 hour
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
       WHERE appointment_date = CURRENT_DATE
-        AND appointment_time <= (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi')
-        AND (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') < appointment_time + INTERVAL '1 hour'
+        AND (
+          (appointment_date + appointment_time)::timestamp 
+          BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' - INTERVAL '1 hour')
+          AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi')
+        )
     `);
 
+    // ✅ Set inactive if not in time range
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
-      WHERE appointment_date != CURRENT_DATE
-         OR (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') < appointment_time
-         OR (CURRENT_TIME AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') >= appointment_time + INTERVAL '1 hour'
+      WHERE appointment_date IS NULL
+         OR appointment_time IS NULL
+         OR appointment_date != CURRENT_DATE
+         OR NOT (
+            (appointment_date + appointment_time)::timestamp 
+            BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' - INTERVAL '1 hour')
+            AND (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi')
+         )
     `);
 
+    // ✅ Return patient info with debug output
     const result = await db.query(`
       SELECT 
         name,
         appointment_date,
         appointment_time,
+        (appointment_date + appointment_time)::timestamp AS appointment_timestamp,
+        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') AS current_time_pakistan,
         CASE
           WHEN is_active THEN 'active'
           ELSE 'no active'
         END AS status
       FROM patient
-      ORDER BY appointment_date ASC, appointment_time ASC
+      ORDER BY appointment_date ASC NULLS LAST, appointment_time ASC NULLS LAST
     `);
 
     res.status(200).json({
