@@ -173,10 +173,10 @@ exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // Set timezone to Asia/Karachi
+    // ⏱️ Set timezone to Asia/Karachi
     await db.query(`SET TIME ZONE 'Asia/Karachi'`);
 
-    // ✅ Set is_active = TRUE if date is today AND time within ±1 hour
+    // ✅ Mark patients as active if today & within 1-hour window
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
@@ -185,7 +185,7 @@ exports.updateActiveStatus = async (req, res) => {
         AND CURRENT_TIME < appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ Otherwise, set is_active = FALSE
+    // ✅ Otherwise set inactive
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
@@ -194,9 +194,12 @@ exports.updateActiveStatus = async (req, res) => {
          OR CURRENT_TIME >= appointment_time + INTERVAL '1 hour'
     `);
 
-    // ✅ Return all patients with their active status
+    // ✅ Fetch status + date + time
     const result = await db.query(`
-      SELECT name,
+      SELECT 
+        name,
+        appointment_date,
+        appointment_time,
         CASE
           WHEN is_active THEN 'active'
           ELSE 'no active'
