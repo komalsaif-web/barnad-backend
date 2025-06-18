@@ -9,5 +9,7 @@ router.get('/by-date/:date', patientController.getPatientsByDate);
 router.delete('/delete/:id', patientController.deleteAppointment);
 router.get('/update-status', patientController.updateActiveStatus);
 router.put('/patients/:id', patientController.updateAppointment);
+router.get('/patient/:id', patientController.getPatientById);
+
 
 module.exports = router;
