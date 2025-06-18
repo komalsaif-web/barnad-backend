@@ -2,7 +2,6 @@ const db = require('../config/db');
 
 // 🧠 Ensure patient table and columns exist
 async function ensurePatientTableExists() {
-  // Step 1: Create patient table if not exists (basic fields)
   await db.query(`
     CREATE TABLE IF NOT EXISTS patient (
       id SERIAL PRIMARY KEY,
@@ -15,7 +14,6 @@ async function ensurePatientTableExists() {
     );
   `);
 
-  // Step 2: Add appointment_time column if missing
   const appointmentTimeCheck = await db.query(`
     SELECT column_name FROM information_schema.columns
     WHERE table_name = 'patient' AND column_name = 'appointment_time'
@@ -24,7 +22,6 @@ async function ensurePatientTableExists() {
     await db.query(`ALTER TABLE patient ADD COLUMN appointment_time TIMESTAMP`);
   }
 
-  // Step 3: Add doctor_id column if missing
   const doctorIdCheck = await db.query(`
     SELECT column_name FROM information_schema.columns
     WHERE table_name = 'patient' AND column_name = 'doctor_id'
@@ -33,6 +30,14 @@ async function ensurePatientTableExists() {
     await db.query(`
       ALTER TABLE patient ADD COLUMN doctor_id TEXT REFERENCES admin(doctor_id) ON DELETE SET NULL
     `);
+  }
+
+  const isActiveCheck = await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'patient' AND column_name = 'is_active'
+  `);
+  if (isActiveCheck.rows.length === 0) {
+    await db.query(`ALTER TABLE patient ADD COLUMN is_active BOOLEAN DEFAULT FALSE`);
   }
 }
 
@@ -52,7 +57,6 @@ exports.createPatient = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // ✅ Check if doctor exists
     const doctorCheck = await db.query(
       'SELECT * FROM admin WHERE doctor_id = $1',
       [doctor_id]
@@ -61,11 +65,10 @@ exports.createPatient = async (req, res) => {
       return res.status(404).json({ error: 'Doctor ID not found' });
     }
 
-    // ✅ Insert patient
     const result = await db.query(
       `INSERT INTO patient (
-        name, phone_number, address, age, gender, disease, appointment_time, doctor_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        name, phone_number, address, age, gender, disease, appointment_time, doctor_id, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE) RETURNING *`,
       [
         name,
         phone_number,
@@ -112,7 +115,7 @@ exports.getPatientsByDoctor = async (req, res) => {
     await ensurePatientTableExists();
 
     const result = await db.query(
-      `SELECT id, name, appointment_time, disease, age, gender, phone_number
+      `SELECT id, name, appointment_time, disease, age, gender, phone_number, is_active
        FROM patient
        WHERE doctor_id = $1
        ORDER BY appointment_time ASC`,
@@ -125,6 +128,7 @@ exports.getPatientsByDoctor = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
 // ✅ Get patients by appointment date
 exports.getPatientsByDate = async (req, res) => {
   const { date } = req.params;
@@ -133,16 +137,80 @@ exports.getPatientsByDate = async (req, res) => {
     await ensurePatientTableExists();
 
     const result = await db.query(
-      `SELECT id, name, appointment_time, disease, age, gender, phone_number, doctor_id
+      `SELECT id, name, appointment_time, disease, age, gender, phone_number, doctor_id, is_active
        FROM patient
        WHERE DATE(appointment_time) = $1
        ORDER BY appointment_time ASC`,
-      [date]  // format should be 'YYYY-MM-DD'
+      [date] // format: 'YYYY-MM-DD'
     );
 
     res.status(200).json({ patients: result.rows });
   } catch (err) {
     console.error('Get Patients By Date Error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ✅ Delete a patient appointment by ID
+exports.deleteAppointment = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await ensurePatientTableExists();
+
+    const check = await db.query(`SELECT * FROM patient WHERE id = $1`, [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    await db.query(`DELETE FROM patient WHERE id = $1`, [id]);
+
+    res.status(200).json({ message: 'Appointment deleted successfully' });
+  } catch (err) {
+    console.error('Delete Appointment Error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ✅ Update is_active status and return name with status
+exports.updateActiveStatus = async (req, res) => {
+  try {
+    await ensurePatientTableExists();
+
+    // ✅ 1. Set is_active = true if appointment time is now ±1 hour
+    await db.query(`
+      UPDATE patient
+      SET is_active = TRUE
+      WHERE appointment_time <= NOW()
+        AND NOW() < appointment_time + INTERVAL '1 hour'
+    `);
+
+    // ✅ 2. Set is_active = false otherwise
+    await db.query(`
+      UPDATE patient
+      SET is_active = FALSE
+      WHERE appointment_time + INTERVAL '1 hour' <= NOW()
+         OR NOW() < appointment_time
+    `);
+
+    // ✅ 3. Fetch names with status
+    const result = await db.query(`
+      SELECT name, 
+        CASE 
+          WHEN is_active THEN 'active' 
+          ELSE 'no active' 
+        END AS status
+      FROM patient
+      ORDER BY appointment_time ASC
+    `);
+
+    res.status(200).json({
+      message: 'Patient statuses updated successfully',
+      patients: result.rows
+    });
+
+  } catch (err) {
+    console.error('Update Active Status Error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
