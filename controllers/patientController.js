@@ -172,7 +172,7 @@ exports.updateActiveStatus = async (req, res) => {
   try {
     await ensurePatientTableExists();
 
-    // ✅ Set patients as active if now is within appointment timestamp ± 1 hour
+    // ✅ Set patients as active if within ±1 hour of appointment time
     await db.query(`
       UPDATE patient
       SET is_active = TRUE
@@ -184,7 +184,7 @@ exports.updateActiveStatus = async (req, res) => {
         )
     `);
 
-    // ✅ Set inactive if not in time range
+    // ✅ Set inactive if not in valid time range
     await db.query(`
       UPDATE patient
       SET is_active = FALSE
@@ -198,14 +198,14 @@ exports.updateActiveStatus = async (req, res) => {
          )
     `);
 
-    // ✅ Return patient info with debug output
+    // ✅ Return result with formatted Lahore time
     const result = await db.query(`
       SELECT 
         name,
         appointment_date,
         appointment_time,
         (appointment_date + appointment_time)::timestamp AS appointment_timestamp,
-        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi') AS current_time_pakistan,
+        TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi'), 'YYYY-MM-DD HH24:MI:SS') AS current_time_lahore,
         CASE
           WHEN is_active THEN 'active'
           ELSE 'no active'
