@@ -6,6 +6,7 @@ require('dotenv').config();
 // ✅ Import your routes
 const adminRoutes = require('./routes/adiminRoutes'); 
 const patientRoutes = require('./routes/patientRoutes'); 
+const chatRoutes = require('./routes/chatRoutes')
 
 // ✅ Middleware
 app.use(cors());
@@ -14,6 +15,8 @@ app.use(express.json());
 // ✅ Routes
 app.use('/api', adminRoutes);
 app.use('/api', patientRoutes);
+app.use('/api', chatRoutes);
+
 
 // ✅ Root route to fix "Cannot GET /"
 app.get('/', (req, res) => {
