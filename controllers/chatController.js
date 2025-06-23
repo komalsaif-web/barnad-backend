@@ -1,37 +1,43 @@
-import axios from "axios";
+// ❌ axios hata dia, is liye import bhi nahi
+// import axios from "axios";
 
 let chatHistory = [];
 
 export const handleChatMessage = async (req, res) => {
   const userMessage = req.body.message;
+
   if (!userMessage) {
     return res.status(400).json({ reply: "Message is required." });
   }
 
   try {
     if (chatHistory.length === 0) {
-      const classifyRes = await axios.post(
+      const classifyRes = await fetch(
         "https://api.groq.com/openai/v1/chat/completions",
         {
-          model: "llama3-70b-8192",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a classifier. If the message is about health, symptoms, illness or medicine, reply with only 'yes'. Otherwise, reply 'no'.",
-            },
-            { role: "user", content: userMessage },
-          ],
-        },
-        {
+          method: "POST",
           headers: {
             Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
             "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            model: "llama3-70b-8192",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a classifier. If the message is about health, symptoms, illness or medicine, reply with only 'yes'. Otherwise, reply 'no'.",
+              },
+              { role: "user", content: userMessage },
+            ],
+          }),
         }
       );
 
-      const isHealth = classifyRes.data.choices[0].message.content.trim().toLowerCase();
+      const classifyData = await classifyRes.json();
+      const isHealth =
+        classifyData.choices[0].message.content.trim().toLowerCase();
+
       if (isHealth !== "yes") {
         return res.json({
           reply:
@@ -61,28 +67,36 @@ Always end with:
 
     chatHistory.push({ role: "user", content: userMessage });
 
-    const chatRes = await axios.post(
+    const chatRes = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
-        model: "llama3-70b-8192",
-        messages: chatHistory,
-      },
-      {
+        method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          model: "llama3-70b-8192",
+          messages: chatHistory,
+        }),
       }
     );
 
-    const aiReply = chatRes.data.choices[0].message.content.trim();
-    const finalReply = aiReply.replace(/This is AI-generated advice.*$/i, "💡 Get well soon! Stay healthy and take care!");
+    const chatData = await chatRes.json();
+    const aiReply = chatData.choices[0].message.content.trim();
+
+    const finalReply = aiReply.replace(
+      /This is AI-generated advice.*$/i,
+      "💡 Get well soon! Stay healthy and take care!"
+    );
 
     chatHistory.push({ role: "assistant", content: finalReply });
 
     res.json({ reply: finalReply });
   } catch (err) {
-    console.error("❌ API Error:", err.response?.data || err.message);
-    res.status(500).json({ reply: "⚠️ Something went wrong with the AI request." });
+    console.error("❌ API Error:", err);
+    res.status(500).json({
+      reply: "⚠️ Something went wrong with the AI request.",
+    });
   }
 };
