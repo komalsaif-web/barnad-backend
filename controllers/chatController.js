@@ -2,7 +2,7 @@ export const handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial" } = req.body;
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({ reply: "Please tell me your health concern or select symptoms." });
+    return res.status(400).json({ reply: "Please share your health concern or select symptoms." });
   }
 
   if (!global.chatHistory) global.chatHistory = [];
@@ -12,35 +12,37 @@ export const handleChatMessage = async (req, res) => {
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
-        content: `You are VRX, a nurse-like AI health assistant. Be concise, empathetic, and professional.
+        content: `You are VRX, a professional nurse-like AI health assistant. Be concise, empathetic, and easy to understand.
 
-1. Start by asking: "What's your main health concern?"
-2. When the user describes an illness (e.g., "kidney pain", "fever"):
-   - Respond with: "I’m sorry you’re feeling this way. Please select any of these symptoms you’re experiencing:"
-   - Provide a checklist of 3–5 related symptoms in this format: ["Symptom1", "Symptom2", "Symptom3"]
+1. Start with: "What’s your main health concern?"
+2. When user shares a concern (e.g., "cancer", "fever"):
+   - Respond: "I’m sorry you’re worried. Please check any symptoms you have:"
+   - Provide 3–5 symptoms in: ["Symptom1", "Symptom2", "Symptom3"]
 3. When symptoms are received:
-   - Suggest a likely condition (e.g., "Possible Urinary Tract Infection")
-   - Recommend 2–3 short treatments (e.g., "Drink water", "Take ibuprofen", "See a doctor")
-   - Ask: "Did you find this suggestion helpful? (Yes/No)"
-4. If the user says "No" to the suggestion:
-   - Respond with: "I’m here to help! Could you share more details about your symptoms or what feels off?"
-   - Provide a new checklist of 3–5 refined symptoms based on the user’s input.
-5. If the user says "Yes", reset to: "Glad I could help! Any other health concerns?"
-6. Do NOT offer PDF downloads. Keep responses short and clear.`
+   - Suggest a condition (e.g., "Possible Cold")
+   - List 2–3 short actions (e.g., "Take paracetamol", "Rest", "See doctor")
+   - Ask: "Did this help? (Yes/No)"
+4. If user selects "No":
+   - Respond: "I’m here to help! Please check more symptoms:"
+   - Provide 3–5 new symptoms based on prior input.
+5. If user selects "Yes":
+   - Respond: "Glad I helped! What’s your next concern?"
+6. Use simple words, no jargon. No PDF offers.
+7. On error, return: "Sorry, I couldn’t process that. Please try again."`
       });
     }
 
     let input;
     if (context === "symptoms") {
       input = symptoms.length > 0
-        ? `Patient selected: ${symptoms.join(", ")}`
+        ? `Symptoms: ${symptoms.join(", ")}`
         : userMessage;
     } else if (context === "feedback") {
-      input = `User feedback: ${userMessage}`;
+      input = `Feedback: ${userMessage}`;
     } else if (context === "refine") {
-      input = `User provided more details: ${userMessage}`;
+      input = `More details: ${symptoms.join(", ") || userMessage}`;
     } else {
-      input = userMessage;
+      input = `Concern: ${userMessage}`;
     }
 
     chatHistory.push({ role: "user", content: input });
@@ -54,11 +56,21 @@ export const handleChatMessage = async (req, res) => {
       body: JSON.stringify({
         model: "llama3-70b-8192",
         messages: chatHistory,
+        max_tokens: 150,
+        temperature: 0.6,
       }),
     });
 
+    if (!response.ok) {
+      throw new Error(`API failed: ${response.status}`);
+    }
+
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content?.trim() || "⚠️ AI didn't reply properly.";
+    if (!data.choices?.[0]?.message?.content) {
+      throw new Error("No valid AI response");
+    }
+
+    const reply = data.choices[0].message.content.trim();
     chatHistory.push({ role: "assistant", content: reply });
 
     const match = reply.match(/\[(.*?)\]/);
@@ -68,7 +80,7 @@ export const handleChatMessage = async (req, res) => {
 
     return res.json({ reply, symptomsList });
   } catch (error) {
-    console.error("AI error:", error);
-    return res.status(500).json({ reply: "⚠️ AI request failed." });
+    console.error("AI error:", error.message);
+    return res.status(500).json({ reply: "Sorry, I couldn’t process that. Please try again.", symptomsList: null });
   }
 };
