@@ -1,47 +1,39 @@
 export const handleChatMessage = async (req, res) => {
-  const { message: userMessage } = req.body;
+  const { message: userMessage, symptoms = [] } = req.body;
 
-  if (!userMessage) {
-    return res.status(400).json({ reply: "Message is required." });
+  if (!userMessage && symptoms.length === 0) {
+    return res.status(400).json({ reply: "Message or symptoms required." });
   }
 
   if (!global.chatHistory) global.chatHistory = [];
-
   const chatHistory = global.chatHistory;
 
   try {
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
-        content: `
-You are VRX, a helpful AI health assistant.
-
-STEP 1:
-Start by asking: "What’s your main health concern?" Example: fever, cough, headache.
-
-STEP 2:
-After the user responds, ask 3-4 symptom-related checklist questions based on that condition. Use:
-- Yes
-- No
-- Sometimes
-
-STEP 3:
-Give a possible diagnosis. Keep suggestions short (4–5 words), e.g.:
-- Take ibuprofen, rest well
-- Drink water, use humidifier
-
-Then ask:
-✅ Did you like this suggestion?  
-📄 Want this conversation as PDF?
-
-If user replies "no", ask more questions and try again.
-        `,
+        content: `You are VRX, a helpful AI medical assistant.
+Ask what the user is feeling.
+If the user gives a symptom or complaint (like fever, stomach pain, cough), respond ONLY with 3–5 relevant follow-up symptoms in checklist format.
+For example: ["Headache", "Vomiting", "Chills"]
+Wait for user to select symptoms.
+Then give:
+- Short condition name (e.g. "Flu")
+- 2–3 word treatment suggestions (e.g. "Take rest", "Drink fluids")
+Finally ask:
+✅ Did this help?
+📄 Want this as PDF?
+Keep it short and to the point.`
       });
     }
 
-    chatHistory.push({ role: "user", content: userMessage });
+    const input = symptoms.length > 0
+      ? `${userMessage}\nPatient selected: ${symptoms.join(", ")}`
+      : userMessage;
 
-    const chatRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    chatHistory.push({ role: "user", content: input });
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
@@ -53,20 +45,18 @@ If user replies "no", ask more questions and try again.
       }),
     });
 
-    const chatData = await chatRes.json();
-    let aiReply = chatData.choices?.[0]?.message?.content?.trim() || "⚠️ Unable to get a valid response.";
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content?.trim() || "⚠️ AI didn't reply properly.";
 
-    // Clean up trailing notes
-    aiReply = aiReply.replace(/This is AI-generated advice.*$/i, "").trim();
+    chatHistory.push({ role: "assistant", content: reply });
 
-    // Always add feedback and export options
-    aiReply += `\n\n✅ Did you like this suggestion?\n📄 Want this conversation as PDF?`;
+    // Dynamically extract checklist from AI response
+    const match = reply.match(/\[(.*?)\]/);
+    const symptomsList = match ? match[1].split(/,\s*/).map(s => s.replace(/[\[\]\"]+/g, '').trim()) : null;
 
-    chatHistory.push({ role: "assistant", content: aiReply });
-
-    res.json({ reply: aiReply });
-  } catch (err) {
-    console.error("❌ API Error:", err);
-    res.status(500).json({ reply: "⚠️ Something went wrong with the AI request." });
+    return res.json({ reply, symptomsList });
+  } catch (error) {
+    console.error("AI error:", error);
+    return res.status(500).json({ reply: "⚠️ AI request failed." });
   }
 };
