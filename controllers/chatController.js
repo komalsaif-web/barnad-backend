@@ -9,11 +9,34 @@ export const handleChatMessage = async (req, res) => {
     });
   }
 
+  // Initialize global chat history if not present
   if (!global.chatHistory) global.chatHistory = [];
   chatHistory = global.chatHistory;
 
   try {
-    // System prompt (initial instructions to AI)
+    let input = "";
+    if (context === "symptoms") {
+      input = `Symptoms: ${symptoms.join(", ")}`;
+    } else if (context === "feedback") {
+      input = `Feedback: ${userMessage}`;
+    } else {
+      input = `Concern: ${userMessage}`;
+    }
+
+    // 💡 Reset chat if repeating same concern
+    const lastConcern = chatHistory
+      .slice()
+      .reverse()
+      .find((msg) => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
+
+    const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
+
+    if ((context === "initial" && sameConcern) || context === "feedback") {
+      global.chatHistory = [];
+      chatHistory = global.chatHistory;
+    }
+
+    // 🧠 Add system prompt if history is empty
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
@@ -32,21 +55,13 @@ Never explain. Only short responses. Follow format strictly.`,
       });
     }
 
-    let input = "";
-    if (context === "symptoms") {
-      input = `Symptoms: ${symptoms.join(", ")}`;
-    } else if (context === "feedback") {
-      input = `Feedback: ${userMessage}`;
-    } else {
-      input = `Concern: ${userMessage}`;
-    }
-
+    // Add user's current message
     chatHistory.push({ role: "user", content: input });
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // Will work on Vercel env
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
