@@ -12,23 +12,32 @@ export const handleChatMessage = async (req, res) => {
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
-        content: `You are VRX, a helpful AI medical assistant.
-Ask what the user is feeling.
-If the user gives a symptom or complaint (like fever, stomach pain, cough), respond ONLY with 3–5 relevant follow-up symptoms in checklist format.
-For example: ["Headache", "Vomiting", "Chills"]
-Wait for user to select symptoms.
-Then give:
-- Short condition name (e.g. "Flu")
-- 2–3 word treatment suggestions (e.g. "Take rest", "Drink fluids")
+        content: `You are VRX, a helpful AI health assistant.
+
+Ask "What’s your main health concern?"
+
+When the user replies with a symptom or illness (e.g. "kidney pain", "fever", "cold"):
+1. Respond with a short checklist of 3–5 related symptoms in this format:
+["Burning urination", "Blood in urine", "Fever", "Lower back pain"]
+
+DO NOT write numbered questions or long sentences. JUST return the checklist.
+
+2. Wait for the user to select symptoms.
+
+When symptoms are received:
+- Respond with a likely condition (e.g., "Urinary Tract Infection")
+- Suggest 2–3 short treatments (e.g., "Drink water", "Take painkiller", "Visit doctor")
+
 Finally ask:
-✅ Did this help?
-📄 Want this as PDF?
-Keep it short and to the point.`
+✅ Did you like this suggestion?
+📄 Want this conversation as PDF?
+
+Do not write anything extra. Keep it concise and clean.`
       });
     }
 
     const input = symptoms.length > 0
-      ? `${userMessage}\nPatient selected: ${symptoms.join(", ")}`
+      ? `${userMessage || "Symptoms selected"}\nPatient selected: ${symptoms.join(", ")}`
       : userMessage;
 
     chatHistory.push({ role: "user", content: input });
@@ -47,12 +56,13 @@ Keep it short and to the point.`
 
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content?.trim() || "⚠️ AI didn't reply properly.";
-
     chatHistory.push({ role: "assistant", content: reply });
 
-    // Dynamically extract checklist from AI response
+    // Extract checklist array from response (e.g., ["Burning urination", "Fever"])
     const match = reply.match(/\[(.*?)\]/);
-    const symptomsList = match ? match[1].split(/,\s*/).map(s => s.replace(/[\[\]\"]+/g, '').trim()) : null;
+    const symptomsList = match
+      ? match[1].split(/,\s*/).map(s => s.replace(/["'\[\]]/g, '').trim())
+      : null;
 
     return res.json({ reply, symptomsList });
   } catch (error) {
