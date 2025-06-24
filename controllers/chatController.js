@@ -1,6 +1,3 @@
-import { config } from "dotenv";
-config();
-
 const chatHistory = [];
 
 export async function handleChat(req, res) {
@@ -38,7 +35,7 @@ Do not add extra text or explanation. Use stepwise short responses only.`
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // Vercel handles this
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
