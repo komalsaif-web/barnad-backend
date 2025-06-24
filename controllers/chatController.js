@@ -4,28 +4,31 @@ export const handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial" } = req.body;
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
+    return res.status(400).json({
+      reply: "Please describe your health issue or select symptoms.",
+    });
   }
 
   if (!global.chatHistory) global.chatHistory = [];
   chatHistory = global.chatHistory;
 
   try {
+    // System prompt (initial instructions to AI)
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
-        content: `You are VRX, a helpful, concise, nurse-like AI health assistant. Follow this exact flow:
+        content: `You are VRX, a helpful, concise, nurse-like AI health assistant. Follow this strict flow:
 
-1. Start with: "What’s your main health concern?"
-2. When user answers, show 3–5 symptoms like: ["Nausea", "Bloating", "Cramps"]
-3. When symptoms selected:
-   - Suggestion: [condition name]
-   - Medicine: [short list like Panadol, ORS]
-   - Lab Test (if needed): [Blood Test]
-4. Ask: "Did this help? (Yes/No)"
-5. If user says "No": "Please check more symptoms:"
-6. If user says "Yes": "Glad I helped! What’s your next concern?"
-Use only short helpful responses. No disclaimers.`
+1. Ask: "What’s your main health concern?"
+2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
+3. When symptoms are selected, respond with:
+   Suggestion: [condition]
+   Medicine: [e.g., Panadol, ORS]
+   Lab Test: [e.g., Blood Test]
+   Ask: "Did this help? (Yes/No)"
+4. If user says No: "Please check more symptoms:" and show new JSON array.
+5. If user says Yes: "Glad I helped! What’s your next concern?"
+Never explain. Only short responses. Follow format strictly.`,
       });
     }
 
@@ -43,13 +46,13 @@ Use only short helpful responses. No disclaimers.`
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // Will work on Vercel env
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "llama3-70b-8192",
         messages: chatHistory,
-        temperature: 0.5,
+        temperature: 0.4,
         max_tokens: 200,
       }),
     });
@@ -59,14 +62,16 @@ Use only short helpful responses. No disclaimers.`
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content?.trim();
 
-    if (!reply) throw new Error("Empty reply from model");
+    if (!reply) throw new Error("Empty reply from AI");
 
     chatHistory.push({ role: "assistant", content: reply });
 
-    // Extract symptoms list if available
+    // Extract symptoms (if array present)
     const match = reply.match(/\[(.*?)\]/);
     const symptomsList = match
-      ? match[1].split(/,\s*/).map(sym => sym.replace(/["'\[\]]/g, '').trim())
+      ? match[1]
+          .split(",")
+          .map((s) => s.replace(/["'\[\]]/g, "").trim())
       : null;
 
     return res.json({ reply, symptomsList });
