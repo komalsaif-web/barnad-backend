@@ -1,7 +1,7 @@
-const chatHistory = [];
+let chatHistory = [];
 
 export async function handleChat(req, res) {
-  const { message: userMessage, symptoms = [], context = "initial" } = req.body;
+  const { message: userMessage, symptoms = [], context = "problem" } = req.body;
 
   if (!userMessage && symptoms.length === 0) {
     return res.status(400).json({ reply: "Please describe your problem." });
@@ -35,7 +35,7 @@ Do not add extra text or explanation. Use stepwise short responses only.`
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // Vercel handles this
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -64,7 +64,6 @@ Do not add extra text or explanation. Use stepwise short responses only.`
       symptomsList,
       isFeedback: /agree/i.test(aiReply),
     });
-
   } catch (error) {
     console.error("❌ Error:", error);
     return res.status(500).json({ reply: "System error. Please try again." });
