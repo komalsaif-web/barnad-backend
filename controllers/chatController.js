@@ -5,12 +5,10 @@ export const handleChatMessage = async (req, res) => {
     return res.status(400).json({ reply: "Message is required." });
   }
 
-  // Store chat history globally (can replace with DB or session-based in real app)
   if (!global.chatHistory) global.chatHistory = [];
   const chatHistory = global.chatHistory;
 
   try {
-    // First message – classify if health-related
     if (chatHistory.length === 0) {
       const classifyRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
@@ -41,24 +39,30 @@ export const handleChatMessage = async (req, res) => {
         });
       }
 
-      // Add system instructions for follow-up messages
       chatHistory.push({
         role: "system",
         content: `
 You are a helpful medical assistant named VRX.
 Ask the user one question at a time related to their symptoms.
 
-Always give answers as bullet points like this:
+Give answers as bullet points like this:
 - Yes
 - No
 - Sometimes
 
-DO NOT use A) / B) / C). Only use - bullets.
-After 2-3 questions, suggest a likely condition and basic treatment.
+NEVER use A) B) C). Just use bullet points.
+
+When you suggest a medicine or remedy, keep it short and highlight it, e.g.,:
+- Take <highlight>ibuprofen</highlight>
+- Drink <highlight>water</highlight>
+
+After 2-3 questions, suggest a likely illness and a treatment.
 
 Always end with:
-"💡 Get well soon! Stay healthy and take care!"
-        `,
+✅ Do you agree with this suggestion? If not, I’ll ask more questions.
+
+🧾 Would you like me to mark your session as complete?
+          `,
       });
     }
 
@@ -77,16 +81,17 @@ Always end with:
     });
 
     const chatData = await chatRes.json();
-    const aiReply = chatData.choices?.[0]?.message?.content?.trim() || "⚠️ Unable to get a valid response.";
+    let aiReply = chatData.choices?.[0]?.message?.content?.trim() || "⚠️ Unable to get a valid response.";
 
-    const finalReply = aiReply.replace(
-      /This is AI-generated advice.*$/i,
-      "💡 Get well soon! Stay healthy and take care!"
-    );
+    // Clean footer messages if LLaMA adds disclaimers
+    aiReply = aiReply.replace(/This is AI-generated advice.*$/i, "").trim();
 
-    chatHistory.push({ role: "assistant", content: finalReply });
+    // Always append your custom footer
+    aiReply += `\n\n✅ Do you agree with this suggestion? If not, I’ll ask more questions.\n🧾 Would you like me to mark your session as complete?`;
 
-    res.json({ reply: finalReply });
+    chatHistory.push({ role: "assistant", content: aiReply });
+
+    res.json({ reply: aiReply });
   } catch (err) {
     console.error("❌ API Error:", err);
     res.status(500).json({ reply: "⚠️ Something went wrong with the AI request." });
