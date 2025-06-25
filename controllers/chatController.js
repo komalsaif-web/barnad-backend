@@ -4,7 +4,6 @@ let chatHistories = {}; // store chat history per patient
 // ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", id } = req.body;
-
   console.log("🟡 Incoming:", { id, userMessage, symptoms, context });
 
   if (!id) return res.status(400).json({ error: "Patient ID (id) is required" });
@@ -13,9 +12,7 @@ exports.handleChatMessage = async (req, res) => {
   let chatHistory = chatHistories[id];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({
-      reply: "Please describe your health issue or select symptoms.",
-    });
+    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
   }
 
   try {
@@ -96,30 +93,32 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }
     }
 
-    // ✅ Always save diagnosis on "yes" (insert OR update)
+    // ✅ Save to patient table if user says "yes"
     if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Saving diagnosis...");
+      console.log("💾 Attempting to extract and save diagnosis...");
 
-      const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
-      const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
-      const dosage = reply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
-      const frequency = reply.match(/Frequency:\s*\[(.*?)\]/i)?.[1] || null;
-      const duration = reply.match(/Duration:\s*\[(.*?)\]/i)?.[1] || null;
-      const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
-      const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
+      const extractField = (label) => {
+        const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
+        const match = reply.match(regex);
+        return match?.[1]?.trim() || match?.[2]?.trim() || null;
+      };
 
-      // 🔍 Check if patient exists
-      const check = await db.query(`SELECT id FROM patient WHERE id = $1`, [id]);
+      const diagnose = extractField("Diagnose");
+      const medicine = extractField("Medicine");
+      const dosage = extractField("Dosage");
+      const frequency = extractField("Frequency");
+      const duration = extractField("Duration");
+      const instruction = extractField("Instruction");
+      const labTest = extractField("Lab Test");
 
-      if (check.rows.length === 0) {
-        // 🚀 INSERT if not exists
-        await db.query(`
-          INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
-        console.log("🆕 New patient record created:", id);
-      } else {
-        // ✏️ UPDATE if exists
+      console.log("🧪 Extracted Diagnosis:", {
+        diagnose, medicine, dosage, frequency, duration, instruction, labTest
+      });
+
+      const existing = await db.query(`SELECT id FROM patient WHERE id = $1`, [id]);
+
+      if (existing.rows.length > 0) {
+        // ✅ Update
         await db.query(`
           UPDATE patient SET 
             disease = $1,
@@ -131,7 +130,16 @@ NEVER explain. Stick to the exact format. Be very short.`,
             lab_test = $7
           WHERE id = $8
         `, [diagnose, medicine, dosage, frequency, duration, instruction, labTest, id]);
-        console.log("✅ Diagnosis updated for patient ID:", id);
+
+        console.log("✅ Updated patient record:", id);
+      } else {
+        // ✅ Insert (if patient not found)
+        await db.query(`
+          INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
+
+        console.log("🆕 Inserted new patient record:", id);
       }
     }
 
