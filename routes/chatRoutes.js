@@ -6,6 +6,6 @@ const chatController = require('../controllers/chatController');
 router.post('/chat', chatController.handleChatMessage);
 
 // ✅ GET: Fetch saved diagnosis by patient ID
-router.get('/chat/diagnosis/:id', chatController.getDiagnosisByPatientId);
+router.get('/chat/diagnosis/:id', chatController.getDiagnosisByid);
 
 module.exports = router;

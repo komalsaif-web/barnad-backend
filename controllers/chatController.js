@@ -3,19 +3,19 @@ let chatHistories = {}; // store per-patient chat history in-memory
 
 // ✅ POST /chat
 exports.handleChatMessage = async (req, res) => {
-  const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
+  const { message: userMessage, symptoms = [], context = "initial", id } = req.body;
 
-  console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
+  console.log("🟡 Incoming Request:", { id, userMessage, symptoms, context });
 
-  if (!patientId) {
-    console.warn("⚠️ patientId missing in request");
-    return res.status(400).json({ error: "patientId is required" });
+  if (!id) {
+    console.warn("⚠️ id missing in request");
+    return res.status(400).json({ error: "id is required" });
   }
 
   // Initialize history if not exist
-  if (!chatHistories[patientId]) chatHistories[patientId] = [];
+  if (!chatHistories[id]) chatHistories[id] = [];
 
-  let chatHistory = chatHistories[patientId];
+  let chatHistory = chatHistories[id];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
     return res.status(400).json({
@@ -42,8 +42,8 @@ exports.handleChatMessage = async (req, res) => {
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
       console.log("🔁 Resetting chat history for repeated concern or feedback");
-      chatHistories[patientId] = [];
-      chatHistory = chatHistories[patientId];
+      chatHistories[id] = [];
+      chatHistory = chatHistories[id];
     }
 
     if (chatHistory.length === 0) {
@@ -137,10 +137,10 @@ NEVER explain. Stick to the exact format. Be very short.`,
         duration,
         instruction,
         labTest,
-        patientId
+        id
       ]);
 
-      console.log("✅ Diagnosis saved for patient ID:", patientId);
+      console.log("✅ Diagnosis saved for patient ID:", id);
     }
 
     return res.json({
@@ -158,7 +158,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
 };
 
 // ✅ GET /chat/diagnosis/:id
-exports.getDiagnosisByPatientId = async (req, res) => {
+exports.getDiagnosisByid = async (req, res) => {
   const { id } = req.params;
 
   try {
