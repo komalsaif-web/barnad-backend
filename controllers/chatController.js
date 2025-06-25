@@ -5,7 +5,10 @@ let chatHistories = {}; // store per-patient chat history in-memory
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
 
+  console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
+
   if (!patientId) {
+    console.warn("⚠️ patientId missing in request");
     return res.status(400).json({ error: "patientId is required" });
   }
 
@@ -38,7 +41,8 @@ exports.handleChatMessage = async (req, res) => {
     const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
-      chatHistories[patientId] = []; // reset for new session
+      console.log("🔁 Resetting chat history for repeated concern or feedback");
+      chatHistories[patientId] = [];
       chatHistory = chatHistories[patientId];
     }
 
@@ -66,6 +70,8 @@ NEVER explain. Stick to the exact format. Be very short.`,
 
     chatHistory.push({ role: "user", content: input });
 
+    console.log("🧠 Sending to Groq:", JSON.stringify(chatHistory, null, 2));
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -80,11 +86,16 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }),
     });
 
-    if (!response.ok) throw new Error(`Groq API Error: ${response.status}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Groq API Error:", response.status, errorText);
+      throw new Error(`Groq API Error ${response.status}: ${errorText}`);
+    }
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content?.trim();
+    console.log("✅ Groq Response:", JSON.stringify(data, null, 2));
 
+    const reply = data.choices?.[0]?.message?.content?.trim();
     if (!reply) throw new Error("Empty reply from AI");
 
     chatHistory.push({ role: "assistant", content: reply });
@@ -98,6 +109,8 @@ NEVER explain. Stick to the exact format. Be very short.`,
 
     // ✅ Save to DB if user said "Yes"
     if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+      console.log("💾 Saving diagnosis to DB...");
+
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
       const dosage = reply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
@@ -123,6 +136,8 @@ NEVER explain. Stick to the exact format. Be very short.`,
         instruction,
         patientId
       ]);
+
+      console.log("✅ Diagnosis saved for patient ID:", patientId);
     }
 
     return res.json({
