@@ -1,10 +1,9 @@
 const db = require('../config/db');
-let chatHistories = {};
 
 // ✅ Ensure ai_diagnosis table exists
 async function ensureAiDiagnosisTableExists() {
   await db.query(`
-    CREATE TABLE IF NOT EXISTS ai_diagnosis (
+    CREATE TABLE IF NOT EXISTS chat (
       id SERIAL PRIMARY KEY,
       patient_id INTEGER REFERENCES patient(id) ON DELETE CASCADE,
       diagnose TEXT,
@@ -26,9 +25,6 @@ exports.handleChatMessage = async (req, res) => {
 
   if (!id) return res.status(400).json({ error: "Patient ID (id) is required" });
 
-  if (!chatHistories[id]) chatHistories[id] = [];
-  let chatHistory = chatHistories[id];
-
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
     return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
   }
@@ -39,22 +35,9 @@ exports.handleChatMessage = async (req, res) => {
     else if (context === "feedback") input = `Feedback: ${userMessage}`;
     else input = `Concern: ${userMessage}`;
 
-    const lastConcern = chatHistory.slice().reverse().find(
-      (msg) => msg.role === "user" && msg.content.startsWith("Concern:")
-    )?.content;
-
-    const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
-
-    if ((context === "initial" && sameConcern) || context === "feedback") {
-      console.log("🔁 Resetting chat history for repeated concern or feedback");
-      chatHistories[id] = [];
-      chatHistory = chatHistories[id];
-    }
-
-    if (chatHistory.length === 0) {
-      chatHistory.push({
-        role: "system",
-        content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
+    const systemPrompt = {
+      role: "system",
+      content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 1. Ask: "What's your main health concern?"
 2. When user answers, respond ONLY with a valid JSON array of 3–5 short symptoms, no explanation. Example: ["Fever", "Cough", "Fatigue"]
 3. When symptoms are selected, respond with strictly this format:
@@ -68,11 +51,10 @@ exports.handleChatMessage = async (req, res) => {
    Ask: "Did this help? (Yes/No)"
 4. If user says No: Ask for more symptoms with a new symptom JSON array.
 5. If user says Yes: Say "Glad I helped! What's your next concern?"
-NEVER explain. Stick to the exact format. Be very short.`,
-      });
-    }
+NEVER explain. Stick to the exact format. Be very short.`
+    };
 
-    chatHistory.push({ role: "user", content: input });
+    const chatMessages = [systemPrompt, { role: "user", content: input }];
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -82,7 +64,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
       },
       body: JSON.stringify({
         model: "llama3-70b-8192",
-        messages: chatHistory,
+        messages: chatMessages,
         temperature: 0.4,
         max_tokens: 300,
       }),
@@ -97,8 +79,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
     const reply = data.choices?.[0]?.message?.content?.trim();
     if (!reply) throw new Error("Empty reply from AI");
 
-    chatHistory.push({ role: "assistant", content: reply });
+    console.log("🧠 AI Reply:", reply);
 
+    // ✅ Extract symptoms if it's a list
     let symptomsList = null;
     if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
       try {
@@ -111,42 +94,30 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }
     }
 
-    // ✅ SAVE DIAGNOSIS if user said "yes"
-    if (userMessage?.toLowerCase() === "yes") {
-      const diagnosisMsg = chatHistory.slice().reverse().find(
-        (msg) => msg.role === "assistant" && msg.content.includes("Diagnose:")
-      );
+    // ✅ Extract and save diagnosis if reply contains Diagnose and user said "yes"
+    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+      const extractField = (label) => {
+        const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
+        const match = reply.match(regex);
+        return match?.[1]?.trim() || match?.[2]?.trim() || null;
+      };
 
-      if (diagnosisMsg) {
-        const replyText = diagnosisMsg.content;
+      const diagnose = extractField("Diagnose");
+      const medicine = extractField("Medicine");
+      const dosage = extractField("Dosage");
+      const frequency = extractField("Frequency");
+      const duration = extractField("Duration");
+      const instruction = extractField("Instruction");
+      const labTest = extractField("Lab Test");
 
-        const extractField = (label) => {
-          const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
-          const match = replyText.match(regex);
-          return match?.[1]?.trim() || match?.[2]?.trim() || null;
-        };
+      await ensureAiDiagnosisTableExists();
+      await db.query(`
+        INSERT INTO ai_diagnosis (
+          patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
 
-        const diagnose = extractField("Diagnose");
-        const medicine = extractField("Medicine");
-        const dosage = extractField("Dosage");
-        const frequency = extractField("Frequency");
-        const duration = extractField("Duration");
-        const instruction = extractField("Instruction");
-        const labTest = extractField("Lab Test");
-
-        console.log("🔍 Parsed:", {
-          diagnose, medicine, dosage, frequency, duration, instruction, labTest
-        });
-
-        await ensureAiDiagnosisTableExists();
-        await db.query(`
-          INSERT INTO ai_diagnosis (
-            patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
-
-        console.log("✅ Saved to ai_diagnosis table");
-      }
+      console.log("✅ Diagnosis saved for patient ID:", id);
     }
 
     return res.json({
@@ -156,12 +127,12 @@ NEVER explain. Stick to the exact format. Be very short.`,
     });
 
   } catch (error) {
-    console.error("❌ AI Error:", error.message);
-    res.status(500).json({ reply: "Something went wrong", symptomsList: null });
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({ reply: "Something went wrong", symptomsList: null });
   }
 };
 
-// ✅ GET latest diagnosis
+// ✅ GET /api/chat/ai-diagnosis/:id
 exports.getLatestAiDiagnosis = async (req, res) => {
   const { id } = req.params;
 
@@ -178,7 +149,6 @@ exports.getLatestAiDiagnosis = async (req, res) => {
     }
 
     const d = result.rows[0];
-
     res.json({
       id: d.id,
       patient_id: d.patient_id,
@@ -193,8 +163,9 @@ exports.getLatestAiDiagnosis = async (req, res) => {
         created_at: d.created_at,
       }
     });
+
   } catch (err) {
-    console.error("❌ Fetch Error:", err.message);
+    console.error("❌ Get Diagnosis Error:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };
