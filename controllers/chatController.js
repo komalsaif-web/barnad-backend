@@ -1,5 +1,5 @@
 const db = require('../config/db');
-let chatHistories = {}; // in-memory chat history per patient
+let chatHistories = {};
 
 // ✅ Ensure ai_diagnosis table exists
 async function ensureAiDiagnosisTableExists() {
@@ -97,53 +97,55 @@ NEVER explain. Stick to the exact format. Be very short.`,
     const reply = data.choices?.[0]?.message?.content?.trim();
     if (!reply) throw new Error("Empty reply from AI");
 
-    console.log("🧠 AI Reply:", reply);
     chatHistory.push({ role: "assistant", content: reply });
 
     let symptomsList = null;
     if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
       try {
         const parsed = JSON.parse(reply);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          symptomsList = parsed.map(s => s.trim()).filter(Boolean);
+        if (Array.isArray(parsed)) {
+          symptomsList = parsed.map((s) => s.trim()).filter(Boolean);
         }
       } catch (err) {
-        console.warn("⚠️ Could not parse symptoms array:", err.message);
+        console.warn("⚠️ Could not parse symptoms:", err.message);
       }
     }
 
-    // ✅ Save AI Diagnosis to ai_diagnosis table if user says "yes"
-    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Attempting to save AI diagnosis...");
-      await ensureAiDiagnosisTableExists();
+    // ✅ SAVE DIAGNOSIS if user said "yes"
+    if (userMessage?.toLowerCase() === "yes") {
+      const diagnosisMsg = chatHistory.slice().reverse().find(
+        (msg) => msg.role === "assistant" && msg.content.includes("Diagnose:")
+      );
 
-      const extractField = (label) => {
-        const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
-        const match = reply.match(regex);
-        return match?.[1]?.trim() || match?.[2]?.trim() || null;
-      };
+      if (diagnosisMsg) {
+        const replyText = diagnosisMsg.content;
 
-      const diagnose = extractField("Diagnose");
-      const medicine = extractField("Medicine");
-      const dosage = extractField("Dosage");
-      const frequency = extractField("Frequency");
-      const duration = extractField("Duration");
-      const instruction = extractField("Instruction");
-      const labTest = extractField("Lab Test");
+        const extractField = (label) => {
+          const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
+          const match = replyText.match(regex);
+          return match?.[1]?.trim() || match?.[2]?.trim() || null;
+        };
 
-      console.log("🔍 Parsed Fields:");
-      console.log({ diagnose, medicine, dosage, frequency, duration, instruction, labTest });
+        const diagnose = extractField("Diagnose");
+        const medicine = extractField("Medicine");
+        const dosage = extractField("Dosage");
+        const frequency = extractField("Frequency");
+        const duration = extractField("Duration");
+        const instruction = extractField("Instruction");
+        const labTest = extractField("Lab Test");
 
-      try {
+        console.log("🔍 Parsed:", {
+          diagnose, medicine, dosage, frequency, duration, instruction, labTest
+        });
+
+        await ensureAiDiagnosisTableExists();
         await db.query(`
           INSERT INTO ai_diagnosis (
             patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
 
-        console.log("✅ AI diagnosis saved to ai_diagnosis table");
-      } catch (err) {
-        console.error("❌ DB Insert Error:", err.message);
+        console.log("✅ Saved to ai_diagnosis table");
       }
     }
 
@@ -155,13 +157,11 @@ NEVER explain. Stick to the exact format. Be very short.`,
 
   } catch (error) {
     console.error("❌ AI Error:", error.message);
-    return res.status(500).json({
-      reply: "Sorry, something went wrong.",
-      symptomsList: null,
-    });
+    res.status(500).json({ reply: "Something went wrong", symptomsList: null });
   }
 };
-// ✅ GET /api/chat/ai-diagnosis/:id
+
+// ✅ GET latest diagnosis
 exports.getLatestAiDiagnosis = async (req, res) => {
   const { id } = req.params;
 
@@ -174,7 +174,7 @@ exports.getLatestAiDiagnosis = async (req, res) => {
     `, [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'No AI diagnosis found for this patient' });
+      return res.status(404).json({ error: 'No diagnosis found' });
     }
 
     const d = result.rows[0];
@@ -190,12 +190,11 @@ exports.getLatestAiDiagnosis = async (req, res) => {
         duration: d.duration,
         instruction: d.instruction,
         labTest: d.lab_test,
-        created_at: d.created_at
+        created_at: d.created_at,
       }
     });
-
   } catch (err) {
-    console.error("❌ Get AI Diagnosis Error:", err.message);
+    console.error("❌ Fetch Error:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };
