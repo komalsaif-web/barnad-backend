@@ -12,9 +12,8 @@ exports.handleChatMessage = async (req, res) => {
     return res.status(400).json({ error: "patientId is required" });
   }
 
-  // Initialize history if not exist
+  // Initialize chat history
   if (!chatHistories[patientId]) chatHistories[patientId] = [];
-
   let chatHistory = chatHistories[patientId];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
@@ -52,7 +51,7 @@ exports.handleChatMessage = async (req, res) => {
         content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 
 1. Ask: "What's your main health concern?"
-2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
+2. When user answers, respond ONLY with a valid JSON array of 3–5 short symptoms, no explanation. Example: ["Fever", "Cough", "Fatigue"]
 3. When symptoms are selected, respond with strictly this format:
    Diagnose: [diagnosis or condition name]
    Medicine: [Medicine Name]
@@ -93,22 +92,28 @@ NEVER explain. Stick to the exact format. Be very short.`,
     }
 
     const data = await response.json();
-    console.log("✅ Groq Response:", JSON.stringify(data, null, 2));
-
     const reply = data.choices?.[0]?.message?.content?.trim();
+    console.log("✅ AI Reply:\n", reply);
+
     if (!reply) throw new Error("Empty reply from AI");
 
     chatHistory.push({ role: "assistant", content: reply });
 
-    const match = reply.match(/\[(.*?)\]/);
-    const symptomsList = match
-      ? match[1]
-          .split(",")
-          .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
-      : null;
+    // ✅ Try parsing symptoms from JSON array format
+    let symptomsList = null;
+    if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(reply);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          symptomsList = parsed.map(s => s.trim()).filter(Boolean);
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to parse symptoms array:", err.message);
+      }
+    }
 
-    // ✅ Save to DB if user said "Yes"
-    if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+    // ✅ Save to DB if user says Yes and diagnosis exists
+    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
       console.log("💾 Saving diagnosis to DB...");
 
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
@@ -119,11 +124,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
       const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
-      // Check if patient exists first
       const patientCheck = await db.query('SELECT id FROM patient WHERE id = $1', [patientId]);
-      
+
       if (patientCheck.rows.length === 0) {
-        // Create patient if not exists
         await db.query(`
           INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -138,7 +141,6 @@ NEVER explain. Stick to the exact format. Be very short.`,
           labTest
         ]);
       } else {
-        // Update existing patient
         await db.query(`
           UPDATE patient SET 
             disease = $1,
@@ -169,6 +171,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
       symptomsList,
       isFeedback: reply.includes("Did this help?")
     });
+
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
