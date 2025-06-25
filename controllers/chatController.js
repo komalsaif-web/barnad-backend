@@ -54,26 +54,22 @@ exports.handleChatMessage = async (req, res) => {
     return res.status(400).json({ reply: "Please provide a valid health concern or symptoms." });
   }
 
-  try {
-    const lastConcern = chatHistory.slice().reverse()
-      .find(msg => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
+  // Reset chat if feedback is being sent
+  if (context === "feedback") {
+    console.log("🔁 Resetting chat history on feedback");
+    chatHistories[patientId] = [];
+    chatHistory = chatHistories[patientId];
+  }
 
-    const sameConcern = lastConcern && input && lastConcern.toLowerCase() === input.toLowerCase();
+  if (chatHistory.length === 0) {
+    chatHistory.push({
+      role: "system",
+      content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 
-    if ((context === "initial" && sameConcern) || context === "feedback") {
-      console.log("🔁 Resetting chat history");
-      chatHistories[patientId] = [];
-      chatHistory = chatHistories[patientId];
-    }
-
-    if (chatHistory.length === 0) {
-      chatHistory.push({
-        role: "system",
-        content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
-
-1. Ask: "What’s your main health concern?"
-2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
-3. When symptoms are selected, respond with strictly this format:
+1. User may respond in English, Urdu, or Roman Urdu. Convert all responses to English medically.
+2. Ask: "What’s your main health concern?"
+3. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
+4. When symptoms are selected, respond with strictly this format:
    Diagnose: [diagnosis or condition name]
    Medicine: [Medicine Name]
    Dosage: [e.g., 500mg]
@@ -82,14 +78,15 @@ exports.handleChatMessage = async (req, res) => {
    Instruction: [e.g., Take after food, drink water]
    Lab Test: [e.g., Required: CBC]
    Ask: "Did this help? (Yes/No)"
-4. If user says No: Ask for more symptoms with a new symptom JSON array.
-5. If user says Yes: Say "Glad I helped! What’s your next concern?"
+5. If user says No: Ask for more symptoms with a new symptom JSON array.
+6. If user says Yes: Say "Glad I helped! What’s your next concern?"
 NEVER explain. Stick to the exact format. Be very short.`,
-      });
-    }
+    });
+  }
 
-    chatHistory.push({ role: "user", content: input });
+  chatHistory.push({ role: "user", content: input });
 
+  try {
     console.log("🧠 Sending to Groq:", JSON.stringify(chatHistory, null, 2));
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -113,8 +110,6 @@ NEVER explain. Stick to the exact format. Be very short.`,
     }
 
     const data = await response.json();
-    console.log("✅ Groq Response:", JSON.stringify(data, null, 2));
-
     const reply = data.choices?.[0]?.message?.content?.trim();
     if (!reply) throw new Error("Empty reply from AI");
 
@@ -174,7 +169,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
   }
 };
 
-// ✅ GET diagnosis by patient ID
+// ✅ GET /chat/diagnosis/:id
 exports.getDiagnosisByPatientId = async (req, res) => {
   const { id } = req.params;
 
