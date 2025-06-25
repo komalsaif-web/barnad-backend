@@ -1,24 +1,6 @@
 const db = require('../config/db');
 let chatHistories = {}; // in-memory chat history per patient
 
-// ✅ Ensure ai_diagnosis table exists
-async function ensureAiDiagnosisTableExists() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS ai_diagnosis (
-      id SERIAL PRIMARY KEY,
-      patient_id INTEGER REFERENCES patient(id) ON DELETE CASCADE,
-      diagnose TEXT,
-      medicine TEXT,
-      dosage TEXT,
-      frequency TEXT,
-      duration TEXT,
-      instruction TEXT,
-      lab_test TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-}
-
 // ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", id } = req.body;
@@ -111,10 +93,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }
     }
 
-    // ✅ Save AI Diagnosis to ai_diagnosis table if user says "yes"
+    // ✅ Save AI Diagnosis to `chat` table if user says "yes"
     if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
       console.log("💾 Attempting to save AI diagnosis...");
-      await ensureAiDiagnosisTableExists();
 
       const extractField = (label) => {
         const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
@@ -135,12 +116,12 @@ NEVER explain. Stick to the exact format. Be very short.`,
       });
 
       await db.query(`
-        INSERT INTO ai_diagnosis (
+        INSERT INTO chat (
           patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
 
-      console.log("✅ AI diagnosis saved in ai_diagnosis table");
+      console.log("✅ AI diagnosis saved in `chat` table");
     }
 
     return res.json({
@@ -164,7 +145,7 @@ exports.getLatestAiDiagnosis = async (req, res) => {
 
   try {
     const result = await db.query(`
-      SELECT * FROM ai_diagnosis
+      SELECT * FROM chat
       WHERE patient_id = $1
       ORDER BY created_at DESC
       LIMIT 1
@@ -192,7 +173,7 @@ exports.getLatestAiDiagnosis = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Get AI Diagnosis Error:", err.message);
+    console.error("❌ Get Diagnosis Error:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };
