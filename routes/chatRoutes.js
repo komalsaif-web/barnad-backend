@@ -1,15 +1,15 @@
 const express = require('express');
+const router = express.Router();
+
 const {
   handleChatMessage,
   getDiagnosisByPatientId
 } = require('../controllers/chatController');
 
-const router = express.Router();
-
-// 🟢 AI chat interaction (with patientId)
+// ✅ POST message
 router.post('/chat', handleChatMessage);
 
-// 🔵 Get saved diagnosis for a patient
+// ✅ GET diagnosis by patient ID (no function call here!)
 router.get('/chat/diagnosis/:id', getDiagnosisByPatientId);
 
 module.exports = router;

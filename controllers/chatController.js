@@ -1,47 +1,62 @@
 const db = require('../config/db');
-let chatHistories = {}; // store per-patient chat history in-memory
+let chatHistories = {};
+
+async function ensureColumnsExist() {
+  const requiredCols = {
+    disease: 'TEXT',
+    on_medications: 'TEXT',
+    medical_history: 'TEXT',
+    vitals: 'TEXT',
+    allergies: 'TEXT',
+    professional: 'TEXT',
+  };
+
+  const res = await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'patient';
+  `);
+
+  const existingCols = res.rows.map(row => row.column_name);
+
+  for (const [col, type] of Object.entries(requiredCols)) {
+    if (!existingCols.includes(col)) {
+      console.log(`🧱 Adding missing column: ${col}`);
+      await db.query(`ALTER TABLE patient ADD COLUMN ${col} ${type};`);
+    }
+  }
+}
 
 // ✅ POST /chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
-
   console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
 
   if (!patientId) {
-    console.warn("⚠️ patientId missing in request");
+    console.warn("⚠️ patientId missing");
     return res.status(400).json({ error: "patientId is required" });
   }
 
-  // Initialize history if not exist
   if (!chatHistories[patientId]) chatHistories[patientId] = [];
-
   let chatHistory = chatHistories[patientId];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({
-      reply: "Please describe your health issue or select symptoms.",
-    });
+    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
   }
 
   try {
-    let input = "";
-    if (context === "symptoms") {
-      input = `Symptoms: ${symptoms.join(", ")}`;
-    } else if (context === "feedback") {
-      input = `Feedback: ${userMessage}`;
-    } else {
-      input = `Concern: ${userMessage}`;
-    }
+    let input = context === "symptoms"
+      ? `Symptoms: ${symptoms.join(", ")}`
+      : context === "feedback"
+        ? `Feedback: ${userMessage}`
+        : `Concern: ${userMessage}`;
 
-    const lastConcern = chatHistory
-      .slice()
-      .reverse()
-      .find((msg) => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
+    const lastConcern = chatHistory.slice().reverse()
+      .find(msg => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
 
     const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
-      console.log("🔁 Resetting chat history for repeated concern or feedback");
+      console.log("🔁 Resetting chat history");
       chatHistories[patientId] = [];
       chatHistory = chatHistories[patientId];
     }
@@ -102,14 +117,14 @@ NEVER explain. Stick to the exact format. Be very short.`,
 
     const match = reply.match(/\[(.*?)\]/);
     const symptomsList = match
-      ? match[1]
-          .split(",")
-          .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
+      ? match[1].split(",").map((s) => s.replace(/[\"'\[\]]/g, "").trim())
       : null;
 
-    // ✅ Save to DB if user said "Yes"
+    // ✅ Save if user accepted suggestion
     if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Saving diagnosis to DB...");
+      console.log("💾 User agreed. Checking columns...");
+
+      await ensureColumnsExist(); // 🧱 Ensure table has required columns
 
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
@@ -137,7 +152,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
         patientId
       ]);
 
-      console.log("✅ Diagnosis saved for patient ID:", patientId);
+      console.log("✅ Saved diagnosis for patient ID:", patientId);
     }
 
     return res.json({
@@ -145,6 +160,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
       symptomsList,
       isFeedback: reply.includes("Did this help?")
     });
+
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
@@ -153,8 +169,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
     });
   }
 };
-
-// ✅ GET /chat/diagnosis/:id
+// ✅ GET diagnosis by patient ID
 exports.getDiagnosisByPatientId = async (req, res) => {
   const { id } = req.params;
 
