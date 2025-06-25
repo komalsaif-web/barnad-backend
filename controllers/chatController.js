@@ -1,5 +1,23 @@
 const db = require('../config/db');
-let chatHistories = {}; // store chat history per patient
+let chatHistories = {}; // in-memory chat history per patient
+
+// ✅ Ensure ai_diagnosis table exists
+async function ensureAiDiagnosisTableExists() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ai_diagnosis (
+      id SERIAL PRIMARY KEY,
+      patient_id INTEGER REFERENCES patient(id) ON DELETE CASCADE,
+      diagnose TEXT,
+      medicine TEXT,
+      dosage TEXT,
+      frequency TEXT,
+      duration TEXT,
+      instruction TEXT,
+      lab_test TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
 
 // ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
@@ -93,9 +111,10 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }
     }
 
-    // ✅ Save to patient table if user says "yes"
+    // ✅ Save AI Diagnosis to ai_diagnosis table if user says "yes"
     if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Attempting to extract and save diagnosis...");
+      console.log("💾 Attempting to save AI diagnosis...");
+      await ensureAiDiagnosisTableExists();
 
       const extractField = (label) => {
         const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
@@ -111,36 +130,17 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const instruction = extractField("Instruction");
       const labTest = extractField("Lab Test");
 
-      console.log("🧪 Extracted Diagnosis:", {
+      console.log("🧪 Parsed:", {
         diagnose, medicine, dosage, frequency, duration, instruction, labTest
       });
 
-      const existing = await db.query(`SELECT id FROM patient WHERE id = $1`, [id]);
+      await db.query(`
+        INSERT INTO ai_diagnosis (
+          patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
 
-      if (existing.rows.length > 0) {
-        // ✅ Update
-        await db.query(`
-          UPDATE patient SET 
-            disease = $1,
-            medicine = $2,
-            dosage = $3,
-            frequency = $4,
-            duration = $5,
-            instructions = $6,
-            lab_test = $7
-          WHERE id = $8
-        `, [diagnose, medicine, dosage, frequency, duration, instruction, labTest, id]);
-
-        console.log("✅ Updated patient record:", id);
-      } else {
-        // ✅ Insert (if patient not found)
-        await db.query(`
-          INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
-
-        console.log("🆕 Inserted new patient record:", id);
-      }
+      console.log("✅ AI diagnosis saved in ai_diagnosis table");
     }
 
     return res.json({
@@ -158,37 +158,41 @@ NEVER explain. Stick to the exact format. Be very short.`,
   }
 };
 
-// ✅ GET /api/chat/diagnosis/:id
-exports.getDiagnosisByPatientId = async (req, res) => {
+// ✅ GET /api/chat/ai-diagnosis/:id
+exports.getLatestAiDiagnosis = async (req, res) => {
   const { id } = req.params;
 
   try {
     const result = await db.query(`
-      SELECT id, name, disease, medicine, dosage, frequency, duration, instructions, lab_test
-      FROM patient WHERE id = $1
+      SELECT * FROM ai_diagnosis
+      WHERE patient_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
     `, [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Patient not found' });
+      return res.status(404).json({ error: 'No AI diagnosis found for this patient' });
     }
 
-    const p = result.rows[0];
+    const d = result.rows[0];
+
     res.json({
-      id: p.id,
-      name: p.name || "Unknown",
+      id: d.id,
+      patient_id: d.patient_id,
       diagnosis: {
-        disease: p.disease,
-        medicine: p.medicine,
-        dosage: p.dosage,
-        frequency: p.frequency,
-        duration: p.duration,
-        instruction: p.instructions,
-        labTest: p.lab_test
+        disease: d.diagnose,
+        medicine: d.medicine,
+        dosage: d.dosage,
+        frequency: d.frequency,
+        duration: d.duration,
+        instruction: d.instruction,
+        labTest: d.lab_test,
+        created_at: d.created_at
       }
     });
 
-  } catch (error) {
-    console.error('❌ Diagnosis Fetch Error:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (err) {
+    console.error("❌ Get AI Diagnosis Error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
