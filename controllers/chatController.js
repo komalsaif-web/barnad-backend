@@ -48,6 +48,7 @@ export const handleChatMessage = async (req, res) => {
    Frequency: [e.g., Twice a day]
    Duration: [e.g., 3 days]
    Instruction: [e.g., Take after food, drink water]
+   Lab Test: [e.g., Required: CBC]
    Ask: \"Did this help? (Yes/No)\"
 4. If user says No: Ask for more symptoms with a new symptom JSON array.
 5. If user says Yes: Say \"Glad I helped! What’s your next concern?\"
