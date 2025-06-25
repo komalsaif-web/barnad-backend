@@ -51,7 +51,7 @@ exports.handleChatMessage = async (req, res) => {
         role: "system",
         content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 
-1. Ask: "What’s your main health concern?"
+1. Ask: "What's your main health concern?"
 2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
 3. When symptoms are selected, respond with strictly this format:
    Diagnose: [diagnosis or condition name]
@@ -63,7 +63,7 @@ exports.handleChatMessage = async (req, res) => {
    Lab Test: [e.g., Required: CBC]
    Ask: "Did this help? (Yes/No)"
 4. If user says No: Ask for more symptoms with a new symptom JSON array.
-5. If user says Yes: Say "Glad I helped! What’s your next concern?"
+5. If user says Yes: Say "Glad I helped! What's your next concern?"
 NEVER explain. Stick to the exact format. Be very short.`,
       });
     }
@@ -119,26 +119,47 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
       const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
-      await db.query(`
-        UPDATE patient SET 
-          disease = $1,
-          on_medications = $2,
-          medical_history = $3,
-          vitals = $4,
-          allergies = $5,
-          professional = $6,
-          lab_test = $7
-        WHERE id = $8
-      `, [
-        diagnose,
-        medicine,
-        dosage,
-        frequency,
-        duration,
-        instruction,
-        labTest,
-        patientId
-      ]);
+      // Check if patient exists first
+      const patientCheck = await db.query('SELECT id FROM patient WHERE id = $1', [patientId]);
+      
+      if (patientCheck.rows.length === 0) {
+        // Create patient if not exists
+        await db.query(`
+          INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [
+          patientId,
+          diagnose,
+          medicine,
+          dosage,
+          frequency,
+          duration,
+          instruction,
+          labTest
+        ]);
+      } else {
+        // Update existing patient
+        await db.query(`
+          UPDATE patient SET 
+            disease = $1,
+            medicine = $2,
+            dosage = $3,
+            frequency = $4,
+            duration = $5,
+            instructions = $6,
+            lab_test = $7
+          WHERE id = $8
+        `, [
+          diagnose,
+          medicine,
+          dosage,
+          frequency,
+          duration,
+          instruction,
+          labTest,
+          patientId
+        ]);
+      }
 
       console.log("✅ Diagnosis saved for patient ID:", patientId);
     }
@@ -151,7 +172,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
-      reply: "Sorry, I couldn’t process that. Please try again.",
+      reply: "Sorry, I couldn't process that. Please try again.",
       symptomsList: null,
     });
   }
@@ -163,7 +184,7 @@ exports.getDiagnosisByPatientId = async (req, res) => {
 
   try {
     const result = await db.query(`
-      SELECT id, name, disease, on_medications, medical_history, vitals, allergies, professional, lab_test
+      SELECT id, name, disease, medicine, dosage, frequency, duration, instructions, lab_test
       FROM patient WHERE id = $1
     `, [id]);
 
@@ -175,14 +196,14 @@ exports.getDiagnosisByPatientId = async (req, res) => {
 
     res.status(200).json({
       patient_id: p.id,
-      name: p.name,
+      name: p.name || 'Unknown',
       diagnosis: {
         disease: p.disease,
-        medicine: p.on_medications,
-        dosage: p.medical_history,
-        frequency: p.vitals,
-        duration: p.allergies,
-        instruction: p.professional,
+        medicine: p.medicine,
+        dosage: p.dosage,
+        frequency: p.frequency,
+        duration: p.duration,
+        instruction: p.instructions,
         labTest: p.lab_test || null
       }
     });
