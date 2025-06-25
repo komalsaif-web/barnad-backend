@@ -1,75 +1,59 @@
 const db = require('../config/db');
-let chatHistories = {};
-
-// Ensure Supabase has all needed columns
-async function ensureColumnsExist() {
-  const requiredCols = {
-    disease: 'TEXT',
-    on_medications: 'TEXT',
-    medical_history: 'TEXT',
-    vitals: 'TEXT',
-    allergies: 'TEXT',
-    professional: 'TEXT',
-  };
-
-  const res = await db.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_name = 'patient';
-  `);
-
-  const existingCols = res.rows.map(row => row.column_name);
-
-  for (const [col, type] of Object.entries(requiredCols)) {
-    if (!existingCols.includes(col)) {
-      console.log(`🧱 Adding missing column: ${col}`);
-      await db.query(`ALTER TABLE patient ADD COLUMN ${col} ${type};`);
-    }
-  }
-}
+let chatHistories = {}; // store per-patient chat history in-memory
 
 // ✅ POST /chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
+
   console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
 
   if (!patientId) {
-    console.warn("⚠️ patientId missing");
+    console.warn("⚠️ patientId missing in request");
     return res.status(400).json({ error: "patientId is required" });
   }
 
+  // Initialize history if not exist
   if (!chatHistories[patientId]) chatHistories[patientId] = [];
+
   let chatHistory = chatHistories[patientId];
 
-  let input = null;
-  if (context === "symptoms") {
-    input = symptoms && symptoms.length > 0 ? `Symptoms: ${symptoms.join(", ")}` : null;
-  } else if (context === "feedback") {
-    input = userMessage ? `Feedback: ${userMessage}` : null;
-  } else if (context === "initial") {
-    input = userMessage ? `Concern: ${userMessage}` : null;
+  if (!userMessage && symptoms.length === 0 && context !== "feedback") {
+    return res.status(400).json({
+      reply: "Please describe your health issue or select symptoms.",
+    });
   }
 
-  if (!input) {
-    console.warn("⚠️ Invalid or missing input.");
-    return res.status(400).json({ reply: "Please provide a valid health concern or symptoms." });
-  }
+  try {
+    let input = "";
+    if (context === "symptoms") {
+      input = `Symptoms: ${symptoms.join(", ")}`;
+    } else if (context === "feedback") {
+      input = `Feedback: ${userMessage}`;
+    } else {
+      input = `Concern: ${userMessage}`;
+    }
 
-  // Reset chat if feedback is being sent
-  if (context === "feedback") {
-    console.log("🔁 Resetting chat history on feedback");
-    chatHistories[patientId] = [];
-    chatHistory = chatHistories[patientId];
-  }
+    const lastConcern = chatHistory
+      .slice()
+      .reverse()
+      .find((msg) => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
 
-  if (chatHistory.length === 0) {
-    chatHistory.push({
-      role: "system",
-      content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
+    const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
 
-1. User may respond in English, Urdu, or Roman Urdu. Convert all responses to English medically.
-2. Ask: "What’s your main health concern?"
-3. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
-4. When symptoms are selected, respond with strictly this format:
+    if ((context === "initial" && sameConcern) || context === "feedback") {
+      console.log("🔁 Resetting chat history for repeated concern or feedback");
+      chatHistories[patientId] = [];
+      chatHistory = chatHistories[patientId];
+    }
+
+    if (chatHistory.length === 0) {
+      chatHistory.push({
+        role: "system",
+        content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
+
+1. Ask: "What’s your main health concern?"
+2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
+3. When symptoms are selected, respond with strictly this format:
    Diagnose: [diagnosis or condition name]
    Medicine: [Medicine Name]
    Dosage: [e.g., 500mg]
@@ -78,15 +62,14 @@ exports.handleChatMessage = async (req, res) => {
    Instruction: [e.g., Take after food, drink water]
    Lab Test: [e.g., Required: CBC]
    Ask: "Did this help? (Yes/No)"
-5. If user says No: Ask for more symptoms with a new symptom JSON array.
-6. If user says Yes: Say "Glad I helped! What’s your next concern?"
+4. If user says No: Ask for more symptoms with a new symptom JSON array.
+5. If user says Yes: Say "Glad I helped! What’s your next concern?"
 NEVER explain. Stick to the exact format. Be very short.`,
-    });
-  }
+      });
+    }
 
-  chatHistory.push({ role: "user", content: input });
+    chatHistory.push({ role: "user", content: input });
 
-  try {
     console.log("🧠 Sending to Groq:", JSON.stringify(chatHistory, null, 2));
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -110,6 +93,8 @@ NEVER explain. Stick to the exact format. Be very short.`,
     }
 
     const data = await response.json();
+    console.log("✅ Groq Response:", JSON.stringify(data, null, 2));
+
     const reply = data.choices?.[0]?.message?.content?.trim();
     if (!reply) throw new Error("Empty reply from AI");
 
@@ -117,13 +102,14 @@ NEVER explain. Stick to the exact format. Be very short.`,
 
     const match = reply.match(/\[(.*?)\]/);
     const symptomsList = match
-      ? match[1].split(",").map((s) => s.replace(/[\"'\[\]]/g, "").trim())
+      ? match[1]
+          .split(",")
+          .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
       : null;
 
-    // ✅ Save if user accepted suggestion
-    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 User agreed. Checking columns...");
-      await ensureColumnsExist();
+    // ✅ Save to DB if user said "Yes"
+    if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+      console.log("💾 Saving diagnosis to DB...");
 
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
@@ -151,7 +137,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
         patientId
       ]);
 
-      console.log("✅ Saved diagnosis for patient ID:", patientId);
+      console.log("✅ Diagnosis saved for patient ID:", patientId);
     }
 
     return res.json({
@@ -159,7 +145,6 @@ NEVER explain. Stick to the exact format. Be very short.`,
       symptomsList,
       isFeedback: reply.includes("Did this help?")
     });
-
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
