@@ -1,21 +1,18 @@
 const db = require('../config/db');
-let chatHistories = {}; // store chat history per patient
+let chatHistories = {};        // per-patient chat memory
+let lastDiagnosisReply = {};   // store last Diagnose reply per id
 
-// ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", id } = req.body;
 
   console.log("🟡 Incoming:", { id, userMessage, symptoms, context });
-
   if (!id) return res.status(400).json({ error: "Patient ID (id) is required" });
 
   if (!chatHistories[id]) chatHistories[id] = [];
   let chatHistory = chatHistories[id];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({
-      reply: "Please describe your health issue or select symptoms.",
-    });
+    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
   }
 
   try {
@@ -31,7 +28,7 @@ exports.handleChatMessage = async (req, res) => {
     const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
-      console.log("🔁 Resetting chat history for repeated concern or feedback");
+      console.log("🔁 Resetting chat history...");
       chatHistories[id] = [];
       chatHistory = chatHistories[id];
     }
@@ -53,7 +50,7 @@ exports.handleChatMessage = async (req, res) => {
    Ask: "Did this help? (Yes/No)"
 4. If user says No: Ask for more symptoms with a new symptom JSON array.
 5. If user says Yes: Say "Glad I helped! What's your next concern?"
-NEVER explain. Stick to the exact format. Be very short.`,
+NEVER explain. Stick to the exact format. Be very short.`
       });
     }
 
@@ -73,40 +70,43 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Groq API Error ${response.status}: ${errorText}`);
-    }
-
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content?.trim();
-    if (!reply) throw new Error("Empty reply from AI");
+    if (!reply) throw new Error("Empty reply");
 
     chatHistory.push({ role: "assistant", content: reply });
 
+    // ✅ Save reply if it contains Diagnose
+    if (reply.includes("Diagnose:")) {
+      lastDiagnosisReply[id] = reply;
+    }
+
+    // ✅ Parse symptoms
     let symptomsList = null;
     if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
       try {
         const parsed = JSON.parse(reply);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           symptomsList = parsed.map(s => s.trim()).filter(Boolean);
         }
       } catch (err) {
-        console.warn("⚠️ Could not parse symptoms array:", err.message);
+        console.warn("⚠️ JSON parse error:", err.message);
       }
     }
 
-    // ✅ Save suggestion if user says "yes"
-    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Saving diagnosis to patient table...");
+    // ✅ When user says "yes", use the saved diagnosis
+    if (userMessage?.toLowerCase() === "yes" && lastDiagnosisReply[id]) {
+      console.log("💾 Saving diagnosis to DB...");
 
-      const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
-      const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
-      const dosage = reply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
-      const frequency = reply.match(/Frequency:\s*\[(.*?)\]/i)?.[1] || null;
-      const duration = reply.match(/Duration:\s*\[(.*?)\]/i)?.[1] || null;
-      const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
-      const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
+      const diagnosisReply = lastDiagnosisReply[id];
+
+      const diagnose = diagnosisReply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
+      const medicine = diagnosisReply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
+      const dosage = diagnosisReply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
+      const frequency = diagnosisReply.match(/Frequency:\s*\[(.*?)\]/i)?.[1] || null;
+      const duration = diagnosisReply.match(/Duration:\s*\[(.*?)\]/i)?.[1] || null;
+      const instruction = diagnosisReply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
+      const labTest = diagnosisReply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
       await db.query(`
         UPDATE patient SET 
@@ -118,11 +118,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
           instructions = $6,
           lab_test = $7
         WHERE id = $8
-      `, [
-        diagnose, medicine, dosage, frequency, duration, instruction, labTest, id
-      ]);
+      `, [diagnose, medicine, dosage, frequency, duration, instruction, labTest, id]);
 
-      console.log("✅ Diagnosis updated for patient ID:", id);
+      console.log("✅ Saved to patient id:", id);
     }
 
     return res.json({
@@ -132,11 +130,8 @@ NEVER explain. Stick to the exact format. Be very short.`,
     });
 
   } catch (error) {
-    console.error("❌ AI Error:", error.message);
-    return res.status(500).json({
-      reply: "Sorry, something went wrong.",
-      symptomsList: null,
-    });
+    console.error("❌ Error:", error.message);
+    res.status(500).json({ reply: "Sorry, something went wrong.", symptomsList: null });
   }
 };
 
