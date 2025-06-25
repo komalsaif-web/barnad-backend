@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chatController');
 
-// ✅ POST: Handle incoming chat message from patient
+// ✅ POST: Send message or symptoms to AI
 router.post('/chat', chatController.handleChatMessage);
 
-// ✅ GET: Fetch saved diagnosis by patient ID
-router.get('/chat/diagnosis/:id', chatController.getDiagnosisByPatientId);
+// ✅ GET: Fetch diagnosis history for a patient
+router.get('/chat/history/:id', chatController.getDiagnosisHistory);
 
 module.exports = router;
