@@ -161,3 +161,41 @@ NEVER explain. Stick to the exact format. Be very short.`,
     });
   }
 };
+// ✅ GET /api/chat/ai-diagnosis/:id
+exports.getLatestAiDiagnosis = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.query(`
+      SELECT * FROM ai_diagnosis
+      WHERE patient_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No AI diagnosis found for this patient' });
+    }
+
+    const d = result.rows[0];
+
+    res.json({
+      id: d.id,
+      patient_id: d.patient_id,
+      diagnosis: {
+        disease: d.diagnose,
+        medicine: d.medicine,
+        dosage: d.dosage,
+        frequency: d.frequency,
+        duration: d.duration,
+        instruction: d.instruction,
+        labTest: d.lab_test,
+        created_at: d.created_at
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Get AI Diagnosis Error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
