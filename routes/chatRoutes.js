@@ -1,9 +1,8 @@
-import express from 'express';
-import { handleChatMessage, getFinalDiagnosis } from '../controllers/chatController.js';
+const express = require('express');
+const { handleChatMessage } = require('../controllers/chatController');
 
 const router = express.Router();
 
-router.post('/api/chat', handleChatMessage);
-router.get('/api/final-diagnosis', getFinalDiagnosis);
+router.post('/chat', handleChatMessage);
 
-export default router;
+module.exports = router;

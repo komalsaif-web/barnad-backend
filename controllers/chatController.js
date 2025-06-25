@@ -1,5 +1,4 @@
 let chatHistory = global.chatHistory || [];
-let finalDiagnosis = null;
 
 export const handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial" } = req.body;
@@ -33,7 +32,6 @@ export const handleChatMessage = async (req, res) => {
     if ((context === "initial" && sameConcern) || context === "feedback") {
       global.chatHistory = [];
       chatHistory = global.chatHistory;
-      finalDiagnosis = null;
     }
 
     if (chatHistory.length === 0) {
@@ -90,11 +88,6 @@ NEVER explain. Stick to the exact format. Be very short.`,
           .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
       : null;
 
-    // Save final diagnosis if user agrees
-    if (context === "feedback" && /yes/i.test(userMessage)) {
-      finalDiagnosis = reply;
-    }
-
     return res.json({ reply, symptomsList, isFeedback: reply.includes("Did this help?") });
   } catch (error) {
     console.error("❌ AI Error:", error.message);
@@ -103,13 +96,4 @@ NEVER explain. Stick to the exact format. Be very short.`,
       symptomsList: null,
     });
   }
-};
-
-export const getFinalDiagnosis = (req, res) => {
-  if (!finalDiagnosis) {
-    return res.status(404).json({
-      message: "No final diagnosis available. Please complete the consultation.",
-    });
-  }
-  return res.json({ finalDiagnosis });
 };
