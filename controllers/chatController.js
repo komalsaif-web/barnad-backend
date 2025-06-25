@@ -1,16 +1,24 @@
-let chatHistory = global.chatHistory || [];
+const db = require('../config/db');
+let chatHistories = {}; // store per-patient chat history in-memory
 
-export const handleChatMessage = async (req, res) => {
-  const { message: userMessage, symptoms = [], context = "initial" } = req.body;
+// ✅ POST /chat
+exports.handleChatMessage = async (req, res) => {
+  const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
+
+  if (!patientId) {
+    return res.status(400).json({ error: "patientId is required" });
+  }
+
+  // Initialize history if not exist
+  if (!chatHistories[patientId]) chatHistories[patientId] = [];
+
+  let chatHistory = chatHistories[patientId];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
     return res.status(400).json({
       reply: "Please describe your health issue or select symptoms.",
     });
   }
-
-  if (!global.chatHistory) global.chatHistory = [];
-  chatHistory = global.chatHistory;
 
   try {
     let input = "";
@@ -30,8 +38,8 @@ export const handleChatMessage = async (req, res) => {
     const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
-      global.chatHistory = [];
-      chatHistory = global.chatHistory;
+      chatHistories[patientId] = []; // reset for new session
+      chatHistory = chatHistories[patientId];
     }
 
     if (chatHistory.length === 0) {
@@ -39,8 +47,8 @@ export const handleChatMessage = async (req, res) => {
         role: "system",
         content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 
-1. Ask: \"What’s your main health concern?\"
-2. When user answers, respond only with a JSON array of symptoms. Example: [\"Fever\", \"Cough\", \"Fatigue\"]
+1. Ask: "What’s your main health concern?"
+2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
 3. When symptoms are selected, respond with strictly this format:
    Diagnose: [diagnosis or condition name]
    Medicine: [Medicine Name]
@@ -49,9 +57,9 @@ export const handleChatMessage = async (req, res) => {
    Duration: [e.g., 3 days]
    Instruction: [e.g., Take after food, drink water]
    Lab Test: [e.g., Required: CBC]
-   Ask: \"Did this help? (Yes/No)\"
+   Ask: "Did this help? (Yes/No)"
 4. If user says No: Ask for more symptoms with a new symptom JSON array.
-5. If user says Yes: Say \"Glad I helped! What’s your next concern?\"
+5. If user says Yes: Say "Glad I helped! What’s your next concern?"
 NEVER explain. Stick to the exact format. Be very short.`,
       });
     }
@@ -88,12 +96,79 @@ NEVER explain. Stick to the exact format. Be very short.`,
           .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
       : null;
 
-    return res.json({ reply, symptomsList, isFeedback: reply.includes("Did this help?") });
+    // ✅ Save to DB if user said "Yes"
+    if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+      const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
+      const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
+      const dosage = reply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
+      const frequency = reply.match(/Frequency:\s*\[(.*?)\]/i)?.[1] || null;
+      const duration = reply.match(/Duration:\s*\[(.*?)\]/i)?.[1] || null;
+      const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
+
+      await db.query(`
+        UPDATE patient SET 
+          disease = $1,
+          on_medications = $2,
+          medical_history = $3,
+          vitals = $4,
+          allergies = $5,
+          professional = $6
+        WHERE id = $7
+      `, [
+        diagnose,
+        medicine,
+        dosage,
+        frequency,
+        duration,
+        instruction,
+        patientId
+      ]);
+    }
+
+    return res.json({
+      reply,
+      symptomsList,
+      isFeedback: reply.includes("Did this help?")
+    });
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
       reply: "Sorry, I couldn’t process that. Please try again.",
       symptomsList: null,
     });
+  }
+};
+
+// ✅ GET /chat/diagnosis/:id
+exports.getDiagnosisByPatientId = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.query(`
+      SELECT id, name, disease, on_medications, medical_history, vitals, allergies, professional
+      FROM patient WHERE id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    const p = result.rows[0];
+
+    res.status(200).json({
+      patient_id: p.id,
+      name: p.name,
+      diagnosis: {
+        disease: p.disease,
+        medicine: p.on_medications,
+        dosage: p.medical_history,
+        frequency: p.vitals,
+        duration: p.allergies,
+        instruction: p.professional
+      }
+    });
+  } catch (error) {
+    console.error('❌ Diagnosis Fetch Error:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
