@@ -1,6 +1,7 @@
 const db = require('../config/db');
 let chatHistories = {};
 
+// Ensure Supabase has all needed columns
 async function ensureColumnsExist() {
   const requiredCols = {
     disease: 'TEXT',
@@ -39,21 +40,25 @@ exports.handleChatMessage = async (req, res) => {
   if (!chatHistories[patientId]) chatHistories[patientId] = [];
   let chatHistory = chatHistories[patientId];
 
-  if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
+  let input = null;
+  if (context === "symptoms") {
+    input = symptoms && symptoms.length > 0 ? `Symptoms: ${symptoms.join(", ")}` : null;
+  } else if (context === "feedback") {
+    input = userMessage ? `Feedback: ${userMessage}` : null;
+  } else if (context === "initial") {
+    input = userMessage ? `Concern: ${userMessage}` : null;
+  }
+
+  if (!input) {
+    console.warn("⚠️ Invalid or missing input.");
+    return res.status(400).json({ reply: "Please provide a valid health concern or symptoms." });
   }
 
   try {
-    let input = context === "symptoms"
-      ? `Symptoms: ${symptoms.join(", ")}`
-      : context === "feedback"
-        ? `Feedback: ${userMessage}`
-        : `Concern: ${userMessage}`;
-
     const lastConcern = chatHistory.slice().reverse()
       .find(msg => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
 
-    const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
+    const sameConcern = lastConcern && input && lastConcern.toLowerCase() === input.toLowerCase();
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
       console.log("🔁 Resetting chat history");
@@ -121,10 +126,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
       : null;
 
     // ✅ Save if user accepted suggestion
-    if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
+    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
       console.log("💾 User agreed. Checking columns...");
-
-      await ensureColumnsExist(); // 🧱 Ensure table has required columns
+      await ensureColumnsExist();
 
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
@@ -169,6 +173,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
     });
   }
 };
+
 // ✅ GET diagnosis by patient ID
 exports.getDiagnosisByPatientId = async (req, res) => {
   const { id } = req.params;
