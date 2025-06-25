@@ -108,21 +108,31 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
       const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
-      await db.query(`
-        UPDATE patient SET 
-          disease = $1,
-          medicine = $2,
-          dosage = $3,
-          frequency = $4,
-          duration = $5,
-          instructions = $6,
-          lab_test = $7
-        WHERE id = $8
-      `, [
-        diagnose, medicine, dosage, frequency, duration, instruction, labTest, id
-      ]);
+      // 🔍 Check if patient exists
+      const check = await db.query(`SELECT id FROM patient WHERE id = $1`, [id]);
 
-      console.log("✅ Diagnosis saved for patient ID:", id);
+      if (check.rows.length === 0) {
+        // 🚀 INSERT if not exists
+        await db.query(`
+          INSERT INTO patient (id, disease, medicine, dosage, frequency, duration, instructions, lab_test)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
+        console.log("🆕 New patient record created:", id);
+      } else {
+        // ✏️ UPDATE if exists
+        await db.query(`
+          UPDATE patient SET 
+            disease = $1,
+            medicine = $2,
+            dosage = $3,
+            frequency = $4,
+            duration = $5,
+            instructions = $6,
+            lab_test = $7
+          WHERE id = $8
+        `, [diagnose, medicine, dosage, frequency, duration, instruction, labTest, id]);
+        console.log("✅ Diagnosis updated for patient ID:", id);
+      }
     }
 
     return res.json({
