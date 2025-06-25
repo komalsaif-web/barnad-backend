@@ -1,76 +1,35 @@
 const db = require('../config/db');
-let chatHistories = {}; // store per-patient chat history in-memory
 
-// ✅ POST /chat
 exports.handleChatMessage = async (req, res) => {
   const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
 
-  console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
-
-  if (!patientId) {
-    console.warn("⚠️ patientId missing in request");
-    return res.status(400).json({ error: "patientId is required" });
-  }
-
-  // Initialize history if not exist
-  if (!chatHistories[patientId]) chatHistories[patientId] = [];
-
-  let chatHistory = chatHistories[patientId];
-
-  if (!userMessage && symptoms.length === 0 && context !== "feedback") {
-    return res.status(400).json({
-      reply: "Please describe your health issue or select symptoms.",
-    });
+  if (!patientId) return res.status(400).json({ error: "patientId is required" });
+  if (!userMessage && symptoms.length === 0) {
+    return res.status(400).json({ reply: "Please describe your health issue or select symptoms." });
   }
 
   try {
-    let input = "";
-    if (context === "symptoms") {
-      input = `Symptoms: ${symptoms.join(", ")}`;
-    } else if (context === "feedback") {
-      input = `Feedback: ${userMessage}`;
-    } else {
-      input = `Concern: ${userMessage}`;
-    }
+    let input = context === "symptoms"
+      ? `Symptoms: ${symptoms.join(", ")}`
+      : `Concern: ${userMessage}`;
 
-    const lastConcern = chatHistory
-      .slice()
-      .reverse()
-      .find((msg) => msg.role === "user" && msg.content.startsWith("Concern:"))?.content;
-
-    const sameConcern = lastConcern && lastConcern.toLowerCase() === input.toLowerCase();
-
-    if ((context === "initial" && sameConcern) || context === "feedback") {
-      console.log("🔁 Resetting chat history for repeated concern or feedback");
-      chatHistories[patientId] = [];
-      chatHistory = chatHistories[patientId];
-    }
-
-    if (chatHistory.length === 0) {
-      chatHistory.push({
+    const messages = [
+      {
         role: "system",
-        content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
-
-1. Ask: "What’s your main health concern?"
-2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
-3. When symptoms are selected, respond with strictly this format:
-   Diagnose: [diagnosis or condition name]
-   Medicine: [Medicine Name]
-   Dosage: [e.g., 500mg]
-   Frequency: [e.g., Twice a day]
-   Duration: [e.g., 3 days]
-   Instruction: [e.g., Take after food, drink water]
-   Lab Test: [e.g., Required: CBC]
-   Ask: "Did this help? (Yes/No)"
-4. If user says No: Ask for more symptoms with a new symptom JSON array.
-5. If user says Yes: Say "Glad I helped! What’s your next concern?"
-NEVER explain. Stick to the exact format. Be very short.`,
-      });
-    }
-
-    chatHistory.push({ role: "user", content: input });
-
-    console.log("🧠 Sending to Groq:", JSON.stringify(chatHistory, null, 2));
+        content: `You are VRX, a nurse-like AI health assistant. Follow this exact flow:
+1. User gives concern → you respond with JSON array of symptoms: ["Fever", "Cough"]
+2. If user gives symptoms → respond:
+Diagnose: [Condition]
+Medicine: [Name]
+Dosage: [500mg]
+Frequency: [Twice a day]
+Duration: [3 days]
+Instruction: [Take after food]
+Lab Test: [Required: CBC]
+Ask: "Did this help? (Yes/No)"`,
+      },
+      { role: "user", content: input }
+    ];
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -80,37 +39,19 @@ NEVER explain. Stick to the exact format. Be very short.`,
       },
       body: JSON.stringify({
         model: "llama3-70b-8192",
-        messages: chatHistory,
+        messages,
         temperature: 0.4,
         max_tokens: 300,
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ Groq API Error:", response.status, errorText);
-      throw new Error(`Groq API Error ${response.status}: ${errorText}`);
-    }
-
     const data = await response.json();
-    console.log("✅ Groq Response:", JSON.stringify(data, null, 2));
-
     const reply = data.choices?.[0]?.message?.content?.trim();
-    if (!reply) throw new Error("Empty reply from AI");
 
-    chatHistory.push({ role: "assistant", content: reply });
+    if (!reply) throw new Error("Empty AI response");
 
-    const match = reply.match(/\[(.*?)\]/);
-    const symptomsList = match
-      ? match[1]
-          .split(",")
-          .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
-      : null;
-
-    // ✅ Save to DB if user said "Yes"
+    // ✅ Save to DB if user said "Yes" and response contains diagnosis
     if (userMessage.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Saving diagnosis to DB...");
-
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
       const dosage = reply.match(/Dosage:\s*\[(.*?)\]/i)?.[1] || null;
@@ -139,25 +80,16 @@ NEVER explain. Stick to the exact format. Be very short.`,
         labTest,
         patientId
       ]);
-
-      console.log("✅ Diagnosis saved for patient ID:", patientId);
     }
 
-    return res.json({
-      reply,
-      symptomsList,
-      isFeedback: reply.includes("Did this help?")
-    });
-  } catch (error) {
-    console.error("❌ AI Error:", error.message);
-    return res.status(500).json({
-      reply: "Sorry, I couldn’t process that. Please try again.",
-      symptomsList: null,
-    });
+    return res.json({ reply });
+
+  } catch (err) {
+    console.error("❌ Error:", err.message);
+    return res.status(500).json({ reply: "Something went wrong. Try again." });
   }
 };
 
-// ✅ GET /chat/diagnosis/:id
 exports.getDiagnosisByPatientId = async (req, res) => {
   const { id } = req.params;
 
@@ -173,7 +105,7 @@ exports.getDiagnosisByPatientId = async (req, res) => {
 
     const p = result.rows[0];
 
-    res.status(200).json({
+    return res.status(200).json({
       patient_id: p.id,
       name: p.name,
       diagnosis: {
@@ -186,8 +118,8 @@ exports.getDiagnosisByPatientId = async (req, res) => {
         labTest: p.lab_test || null
       }
     });
-  } catch (error) {
-    console.error('❌ Diagnosis Fetch Error:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (err) {
+    console.error("❌ Fetch Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch diagnosis" });
   }
 };
