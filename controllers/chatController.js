@@ -3,19 +3,19 @@ let chatHistories = {}; // store per-patient chat history in-memory
 
 // ✅ POST /chat
 exports.handleChatMessage = async (req, res) => {
-  const { message: userMessage, symptoms = [], context = "initial", patientId } = req.body;
+  const { message: userMessage, symptoms = [], context = "initial", id } = req.body;
 
-  console.log("🟡 Incoming Request:", { patientId, userMessage, symptoms, context });
+  console.log("🟡 Incoming Request:", { id, userMessage, symptoms, context });
 
-  if (!patientId) {
-    console.warn("⚠️ patientId missing in request");
-    return res.status(400).json({ error: "patientId is required" });
+  if (!id) {
+    console.warn("⚠️ id missing in request");
+    return res.status(400).json({ error: "id is required" });
   }
 
   // Initialize history if not exist
-  if (!chatHistories[patientId]) chatHistories[patientId] = [];
+  if (!chatHistories[id]) chatHistories[id] = [];
 
-  let chatHistory = chatHistories[patientId];
+  let chatHistory = chatHistories[id];
 
   if (!userMessage && symptoms.length === 0 && context !== "feedback") {
     return res.status(400).json({
@@ -42,8 +42,8 @@ exports.handleChatMessage = async (req, res) => {
 
     if ((context === "initial" && sameConcern) || context === "feedback") {
       console.log("🔁 Resetting chat history for repeated concern or feedback");
-      chatHistories[patientId] = [];
-      chatHistory = chatHistories[patientId];
+      chatHistories[id] = [];
+      chatHistory = chatHistories[id];
     }
 
     if (chatHistory.length === 0) {
@@ -117,6 +117,7 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const frequency = reply.match(/Frequency:\s*\[(.*?)\]/i)?.[1] || null;
       const duration = reply.match(/Duration:\s*\[(.*?)\]/i)?.[1] || null;
       const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
+      const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
       await db.query(`
         UPDATE patient SET 
@@ -125,8 +126,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
           medical_history = $3,
           vitals = $4,
           allergies = $5,
-          professional = $6
-        WHERE id = $7
+          professional = $6,
+          lab_test = $7
+        WHERE id = $8
       `, [
         diagnose,
         medicine,
@@ -134,10 +136,11 @@ NEVER explain. Stick to the exact format. Be very short.`,
         frequency,
         duration,
         instruction,
-        patientId
+        labTest,
+        id
       ]);
 
-      console.log("✅ Diagnosis saved for patient ID:", patientId);
+      console.log("✅ Diagnosis saved for patient ID:", id);
     }
 
     return res.json({
@@ -155,12 +158,12 @@ NEVER explain. Stick to the exact format. Be very short.`,
 };
 
 // ✅ GET /chat/diagnosis/:id
-exports.getDiagnosisByPatientId = async (req, res) => {
+exports.getDiagnosisByid = async (req, res) => {
   const { id } = req.params;
 
   try {
     const result = await db.query(`
-      SELECT id, name, disease, on_medications, medical_history, vitals, allergies, professional
+      SELECT id, name, disease, on_medications, medical_history, vitals, allergies, professional, lab_test
       FROM patient WHERE id = $1
     `, [id]);
 
@@ -179,7 +182,8 @@ exports.getDiagnosisByPatientId = async (req, res) => {
         dosage: p.medical_history,
         frequency: p.vitals,
         duration: p.allergies,
-        instruction: p.professional
+        instruction: p.professional,
+        labTest: p.lab_test || null
       }
     });
   } catch (error) {
