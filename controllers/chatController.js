@@ -96,9 +96,9 @@ NEVER explain. Stick to the exact format. Be very short.`,
       }
     }
 
-    // ✅ Save suggestion if user says "yes"
+    // ✅ Always save diagnosis on "yes" (insert OR update)
     if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      console.log("💾 Attempting to save diagnosis...");
+      console.log("💾 Saving diagnosis...");
 
       const diagnose = reply.match(/Diagnose:\s*\[(.*?)\]/i)?.[1] || null;
       const medicine = reply.match(/Medicine:\s*\[(.*?)\]/i)?.[1] || null;
@@ -108,29 +108,21 @@ NEVER explain. Stick to the exact format. Be very short.`,
       const instruction = reply.match(/Instruction:\s*\[(.*?)\]/i)?.[1] || null;
       const labTest = reply.match(/Lab Test:\s*\[(.*?)\]/i)?.[1] || null;
 
-      // Check if diagnosis already saved
-      const check = await db.query(`SELECT disease FROM patient WHERE id = $1`, [id]);
+      await db.query(`
+        UPDATE patient SET 
+          disease = $1,
+          medicine = $2,
+          dosage = $3,
+          frequency = $4,
+          duration = $5,
+          instructions = $6,
+          lab_test = $7
+        WHERE id = $8
+      `, [
+        diagnose, medicine, dosage, frequency, duration, instruction, labTest, id
+      ]);
 
-      if (check.rows.length === 0) {
-        console.warn("⚠️ Patient not found in DB");
-      } else if (check.rows[0].disease) {
-        console.log("⛔ Already diagnosed, skipping update.");
-      } else {
-        await db.query(`
-          UPDATE patient SET 
-            disease = $1,
-            medicine = $2,
-            dosage = $3,
-            frequency = $4,
-            duration = $5,
-            instructions = $6,
-            lab_test = $7
-          WHERE id = $8
-        `, [
-          diagnose, medicine, dosage, frequency, duration, instruction, labTest, id
-        ]);
-        console.log("✅ Diagnosis saved to patient id:", id);
-      }
+      console.log("✅ Diagnosis saved for patient ID:", id);
     }
 
     return res.json({
