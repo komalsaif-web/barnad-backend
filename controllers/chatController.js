@@ -9,7 +9,6 @@ export const handleChatMessage = async (req, res) => {
     });
   }
 
-  // Initialize global chat history if not present
   if (!global.chatHistory) global.chatHistory = [];
   chatHistory = global.chatHistory;
 
@@ -23,7 +22,6 @@ export const handleChatMessage = async (req, res) => {
       input = `Concern: ${userMessage}`;
     }
 
-    // 💡 Reset chat if repeating same concern
     const lastConcern = chatHistory
       .slice()
       .reverse()
@@ -36,26 +34,27 @@ export const handleChatMessage = async (req, res) => {
       chatHistory = global.chatHistory;
     }
 
-    // 🧠 Add system prompt if history is empty
     if (chatHistory.length === 0) {
       chatHistory.push({
         role: "system",
-        content: `You are VRX, a helpful, concise, nurse-like AI health assistant. Follow this strict flow:
+        content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
 
-1. Ask: "What’s your main health concern?"
-2. When user answers, respond only with a JSON array of symptoms. Example: ["Fever", "Cough", "Fatigue"]
-3. When symptoms are selected, respond with:
-   Suggestion: [condition]
-   Medicine: [e.g., Panadol, ORS]
-   Lab Test: [e.g., Blood Test]
-   Ask: "Did this help? (Yes/No)"
-4. If user says No: "Please check more symptoms:" and show new JSON array.
-5. If user says Yes: "Glad I helped! What’s your next concern?"
-Never explain. Only short responses. Follow format strictly.`,
+1. Ask: \"What’s your main health concern?\"
+2. When user answers, respond only with a JSON array of symptoms. Example: [\"Fever\", \"Cough\", \"Fatigue\"]
+3. When symptoms are selected, respond with strictly this format:
+   Suggestion: [diagnosis or condition name]
+   Medicine: [Medicine Name]
+   Dosage: [e.g., 500mg]
+   Frequency: [e.g., Twice a day]
+   Duration: [e.g., 3 days]
+   Instruction: [e.g., Take after food, drink water]
+   Ask: \"Did this help? (Yes/No)\"
+4. If user says No: Ask for more symptoms with a new symptom JSON array.
+5. If user says Yes: Say \"Glad I helped! What’s your next concern?\"
+NEVER explain. Stick to the exact format. Be very short.`,
       });
     }
 
-    // Add user's current message
     chatHistory.push({ role: "user", content: input });
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -68,7 +67,7 @@ Never explain. Only short responses. Follow format strictly.`,
         model: "llama3-70b-8192",
         messages: chatHistory,
         temperature: 0.4,
-        max_tokens: 200,
+        max_tokens: 300,
       }),
     });
 
@@ -81,15 +80,14 @@ Never explain. Only short responses. Follow format strictly.`,
 
     chatHistory.push({ role: "assistant", content: reply });
 
-    // Extract symptoms (if array present)
     const match = reply.match(/\[(.*?)\]/);
     const symptomsList = match
       ? match[1]
           .split(",")
-          .map((s) => s.replace(/["'\[\]]/g, "").trim())
+          .map((s) => s.replace(/[\"'\[\]]/g, "").trim())
       : null;
 
-    return res.json({ reply, symptomsList });
+    return res.json({ reply, symptomsList, isFeedback: reply.includes("Did this help?") });
   } catch (error) {
     console.error("❌ AI Error:", error.message);
     return res.status(500).json({
