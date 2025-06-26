@@ -190,3 +190,41 @@ exports.getLatestAiDiagnosis = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
+// ✅ PUT /api/chat/ai-diagnosis/:chatId
+exports.updateAiDiagnosis = async (req, res) => {
+  const { chatId } = req.params;
+  const {
+    diagnose,
+    medicine,
+    dosage,
+    frequency,
+    duration,
+    instruction,
+    lab_test,
+  } = req.body;
+
+  try {
+    const result = await db.query(
+      `UPDATE chat SET
+        diagnose = $1,
+        medicine = $2,
+        dosage = $3,
+        frequency = $4,
+        duration = $5,
+        instruction = $6,
+        lab_test = $7
+      WHERE id = $8
+      RETURNING *`,
+      [diagnose, medicine, dosage, frequency, duration, instruction, lab_test, chatId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Diagnosis not found to update' });
+    }
+
+    res.json({ message: "Diagnosis updated successfully", updatedDiagnosis: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Update Diagnosis Error:", error.message);
+    res.status(500).json({ error: "Failed to update diagnosis" });
+  }
+};
