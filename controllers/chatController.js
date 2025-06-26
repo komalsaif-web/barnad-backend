@@ -1,7 +1,7 @@
 const db = require('../config/db');
 
-// ✅ Ensure chat table exists
-async function ensureAiDiagnosisTableExists() {
+// ✅ Optional: Ensure chat table exists (only once at app start)
+async function ensureChatTableExists() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS chat (
       id SERIAL PRIMARY KEY,
@@ -17,6 +17,8 @@ async function ensureAiDiagnosisTableExists() {
     )
   `);
 }
+// (You can call ensureChatTableExists() once in your app's startup file like index.js)
+
 
 // ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
@@ -38,20 +40,27 @@ exports.handleChatMessage = async (req, res) => {
     const systemPrompt = {
       role: "system",
       content: `You are VRX, a concise, nurse-like AI health assistant. Follow this strict flow:
+
 1. Ask: "What's your main health concern?"
-2. When user answers, respond ONLY with a valid JSON array of 3–5 short symptoms, no explanation. Example: ["Fever", "Cough", "Fatigue"]
-3. When symptoms are selected, respond with strictly this format:
-   Diagnose: [diagnosis or condition name]
-   Medicine: [Medicine Name]
-   Dosage: [e.g., 500mg]
-   Frequency: [e.g., Twice a day]
-   Duration: [e.g., 3 days]
-   Instruction: [e.g., Take after food, drink water]
-   Lab Test: [e.g., Required: CBC]
-   Ask: "Did this help? (Yes/No)"
-4. If user says No: Ask for more symptoms with a new symptom JSON array.
-5. If user says Yes: Say "Glad I helped! What's your next concern?"
-NEVER explain. Stick to the exact format. Be very short.`
+
+2. If user shares a concern, respond ONLY with a valid JSON array of 3–5 short symptoms. No explanation. Example: ["Fever", "Cough", "Fatigue"]
+
+3. If input starts with "Symptoms:", do NOT return more symptoms. Instead, respond ONLY with the following strict format:
+
+Diagnose: [diagnosis or condition name]  
+Medicine: [Medicine Name]  
+Dosage: [e.g., 500mg]  
+Frequency: [e.g., Twice a day]  
+Duration: [e.g., 3 days]  
+Instruction: [e.g., Take after food, drink water]  
+Lab Test: [e.g., Required: CBC]  
+Ask: "Did this help? (Yes/No)"
+
+4. If user says No, ask for more symptoms in JSON array
+
+5. If user says Yes, say "Glad I helped! What's your next concern?"
+
+ALWAYS follow the format exactly. Do NOT explain anything.`
     };
 
     const chatMessages = [systemPrompt, { role: "user", content: input }];
@@ -81,7 +90,7 @@ NEVER explain. Stick to the exact format. Be very short.`
 
     console.log("🧠 AI Reply:", reply);
 
-    // ✅ Extract symptoms if it's a list
+    // ✅ Extract symptoms if it's a list (initial context only)
     let symptomsList = null;
     if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
       try {
@@ -110,7 +119,6 @@ NEVER explain. Stick to the exact format. Be very short.`
       const instruction = extractField("Instruction");
       const labTest = extractField("Lab Test");
 
-      await ensureAiDiagnosisTableExists();
       await db.query(`
         INSERT INTO chat (
           patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
