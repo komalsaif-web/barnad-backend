@@ -1,6 +1,6 @@
 const db = require('../config/db');
 
-// ✅ Ensure ai_diagnosis table exists
+// ✅ Ensure chat table exists
 async function ensureAiDiagnosisTableExists() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS chat (
@@ -112,7 +112,7 @@ NEVER explain. Stick to the exact format. Be very short.`
 
       await ensureAiDiagnosisTableExists();
       await db.query(`
-        INSERT INTO ai_diagnosis (
+        INSERT INTO chat (
           patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
@@ -138,7 +138,7 @@ exports.getLatestAiDiagnosis = async (req, res) => {
 
   try {
     const result = await db.query(`
-      SELECT * FROM ai_diagnosis
+      SELECT * FROM chat
       WHERE patient_id = $1
       ORDER BY created_at DESC
       LIMIT 1
