@@ -1,6 +1,9 @@
 const db = require('../config/db');
 
-// ✅ Optional: Ensure chat table exists (only once at app start)
+// 🧠 Temporary in-memory storage for last diagnosis per patient
+const lastDiagnosisReplies = {}; // key = patient_id, value = diagnosis string
+
+// ✅ Optional: Ensure chat table exists once
 async function ensureChatTableExists() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS chat (
@@ -17,8 +20,6 @@ async function ensureChatTableExists() {
     )
   `);
 }
-// (You can call ensureChatTableExists() once in your app's startup file like index.js)
-
 
 // ✅ POST /api/chat
 exports.handleChatMessage = async (req, res) => {
@@ -90,7 +91,7 @@ ALWAYS follow the format exactly. Do NOT explain anything.`
 
     console.log("🧠 AI Reply:", reply);
 
-    // ✅ Extract symptoms if it's a list (initial context only)
+    // ✅ Extract symptoms if it's a list (only on initial message)
     let symptomsList = null;
     if (context === "initial" && reply.startsWith("[") && reply.endsWith("]")) {
       try {
@@ -103,29 +104,41 @@ ALWAYS follow the format exactly. Do NOT explain anything.`
       }
     }
 
-    // ✅ Extract and save diagnosis if reply contains Diagnose and user said "yes"
-    if (userMessage?.toLowerCase() === "yes" && reply.includes("Diagnose:")) {
-      const extractField = (label) => {
-        const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
-        const match = reply.match(regex);
-        return match?.[1]?.trim() || match?.[2]?.trim() || null;
-      };
+    // ✅ Save last diagnosis in memory if context was "symptoms" and AI gave diagnosis
+    if (context === "symptoms" && reply.includes("Diagnose:")) {
+      lastDiagnosisReplies[id] = reply;
+    }
 
-      const diagnose = extractField("Diagnose");
-      const medicine = extractField("Medicine");
-      const dosage = extractField("Dosage");
-      const frequency = extractField("Frequency");
-      const duration = extractField("Duration");
-      const instruction = extractField("Instruction");
-      const labTest = extractField("Lab Test");
+    // ✅ On "yes", try saving either current reply or last one
+    if (userMessage?.toLowerCase() === "yes") {
+      const diagnosisReply = reply.includes("Diagnose:") ? reply : lastDiagnosisReplies[id];
 
-      await db.query(`
-        INSERT INTO chat (
-          patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
+      if (diagnosisReply && diagnosisReply.includes("Diagnose:")) {
+        const extractField = (label) => {
+          const regex = new RegExp(`${label}:\\s*(?:\\[(.*?)\\]|(.*))`, 'i');
+          const match = diagnosisReply.match(regex);
+          return match?.[1]?.trim() || match?.[2]?.trim() || null;
+        };
 
-      console.log("✅ Diagnosis saved for patient ID:", id);
+        const diagnose = extractField("Diagnose");
+        const medicine = extractField("Medicine");
+        const dosage = extractField("Dosage");
+        const frequency = extractField("Frequency");
+        const duration = extractField("Duration");
+        const instruction = extractField("Instruction");
+        const labTest = extractField("Lab Test");
+
+        await db.query(`
+          INSERT INTO chat (
+            patient_id, diagnose, medicine, dosage, frequency, duration, instruction, lab_test
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
+
+        console.log("✅ Diagnosis saved from memory for patient ID:", id);
+
+        // ✅ Clear saved reply after saving
+        delete lastDiagnosisReplies[id];
+      }
     }
 
     return res.json({
