@@ -135,10 +135,18 @@ ALWAYS follow the format exactly. Do NOT explain anything.`
         `, [id, diagnose, medicine, dosage, frequency, duration, instruction, labTest]);
 
         console.log("✅ Diagnosis saved from memory for patient ID:", id);
-
-        // ✅ Clear saved reply after saving
         delete lastDiagnosisReplies[id];
       }
+    }
+
+    // ✅ On "no", re-trigger symptoms again
+    else if (userMessage?.toLowerCase() === "no") {
+      // Reset context for next round
+      return res.json({
+        reply: `Please select more symptoms:`,
+        symptomsList: ["Fever", "Pain", "Vomiting", "Headache", "Nausea"],
+        isFeedback: false,
+      });
     }
 
     return res.json({
@@ -153,7 +161,7 @@ ALWAYS follow the format exactly. Do NOT explain anything.`
   }
 };
 
-// ✅ GET /api/chat/ai-diagnosis/:id
+// ✅ GET latest diagnosis
 exports.getLatestAiDiagnosis = async (req, res) => {
   const { id } = req.params;
 
@@ -190,7 +198,8 @@ exports.getLatestAiDiagnosis = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
-// ✅ PUT /api/chat/ai-diagnosis/:chatId
+
+// ✅ PUT update diagnosis
 exports.updateAiDiagnosis = async (req, res) => {
   const { chatId } = req.params;
   const {
